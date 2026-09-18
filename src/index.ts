@@ -177,8 +177,8 @@ async function saveLesson(
         conflict: {
           type: "blocked",
           message:
-            (b.teacher ? b.teacher + "T는" : "그 시간에는") + " " + b.title +
-            " 때문에 수업을 넣을 수 없는 시간입니다. 그래도 등록할까요?",
+            (b.teacher ? b.teacher + "T는 " : "") +
+            "수업을 넣을 수 없는 시간입니다. 그래도 등록할까요?",
           existing: b,
         },
       },
