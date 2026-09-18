@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nadajoo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-18",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  // 원본 데이터는 Notion 두 데이터베이스(학생·수업)다. 여기 둘 바인딩은 없다.
+  // 아래 값들은 전부 시크릿이라 여기 두지 않는다 (npx wrangler secret put <이름>):
+  //   SHARED_PASSWORD     앱 전체 접근용 공유 비밀번호 (이 앱은 조회도 잠근다 — 학생 연락처를 다룬다)
+  //   NOTION_TOKEN        Notion 내부 통합 토큰 (ntn_...)
+  //   NOTION_STUDENT_DB   "나다주 학생" 데이터베이스 ID
+  //   NOTION_LESSON_DB    "나다주 수업" 데이터베이스 ID
+  "observability": {
+    "enabled": true
+  }
+}
