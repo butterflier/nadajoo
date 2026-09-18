@@ -1208,7 +1208,7 @@
   var TITLE_H = 46;
   var HEAD_H = 42;
   var TIME_W = 54;
-  var HOUR_H = 48;
+  var HOUR_H = 56;
   var LEGEND_ROW_H = 20;
 
   var LINE = "#DEE2E7";
@@ -1289,6 +1289,27 @@
     });
   }
 
+  /**
+   * 그릴 시간 구간을 수업에서 뽑는다.
+   *
+   * 화면은 08:00~24:00 을 다 보여 주지만, PNG는 카톡·슬랙으로 받아 보는 것이라
+   * 빈 시간을 그대로 두면 수업이 작게 깔린다. 가장 이른 수업~가장 늦은 수업에
+   * 앞뒤 한 시간씩만 남기고 잘라낸다.
+   */
+  function rangeOf(items) {
+    var lo = null, hi = null;
+    items.forEach(function (l) {
+      lo = lo === null ? l.start_min : Math.min(lo, l.start_min);
+      hi = hi === null ? l.end_min : Math.max(hi, l.end_min);
+    });
+    // 수업이 하나도 없으면 빈 시간표라도 보기 좋은 구간으로 낸다
+    if (lo === null) return { from: 9 * 60, to: 18 * 60 };
+    return {
+      from: Math.max(H.DAY_START_MIN, Math.floor((lo - 60) / 60) * 60),
+      to: Math.min(H.DAY_END_MIN, Math.ceil((hi + 60) / 60) * 60)
+    };
+  }
+
   /** 범례 항목을 주어진 폭 안에서 줄 단위로 접는다. 최소 한 줄은 낸다. */
   function packLegend(items, maxWidth) {
     var measure = document.createElement("canvas").getContext("2d");
@@ -1331,7 +1352,15 @@
     await ready();
 
     var plan = currentPlan();
-    var bodyH = H.HOURS * HOUR_H;
+
+    // 수업이 있는 시간대만 그린다
+    var all = [];
+    plan.cols.forEach(function (c) { all = all.concat(c.items); });
+    var range = rangeOf(all);
+    var hours = (range.to - range.from) / 60;
+    var span = range.to - range.from;
+
+    var bodyH = hours * HOUR_H;
     var w = PAD * 2 + TIME_W + plan.colW * plan.cols.length;
 
     // 범례 항목이 많으면(학생이 여럿이면) 여러 줄로 접힌다. 줄 수를 먼저 세야
@@ -1396,7 +1425,7 @@
     ctx.stroke();
 
     // 30분 선(연하게) → 정시 선 → 세로 선 순으로 겹쳐 그린다
-    for (var k = 1; k < H.HOURS * 2; k++) {
+    for (var k = 1; k < hours * 2; k++) {
       if (k % 2 === 0) continue;
       var y = bodyY + (k / 2) * HOUR_H;
       ctx.beginPath();
@@ -1409,9 +1438,9 @@
 
     ctx.lineWidth = 1.4;
     ctx.strokeStyle = LINE;
-    for (var hh = 0; hh <= H.HOURS; hh++) {
+    for (var hh = 0; hh <= hours; hh++) {
       var yy = bodyY + hh * HOUR_H;
-      if (hh > 0 && hh < H.HOURS) {
+      if (hh > 0 && hh < hours) {
         ctx.beginPath();
         ctx.moveTo(gridX, yy);
         ctx.lineTo(w - PAD, yy);
@@ -1420,7 +1449,7 @@
       ctx.fillStyle = INK_SOFT;
       ctx.font = font(400, 11);
       ctx.textAlign = "right";
-      var min = H.DAY_START_MIN + hh * 60;
+      var min = range.from + hh * 60;
       ctx.fillText(min === 1440 ? "24:00" : H.toTimeLabel(min), gridX - 8, yy + 4);
       ctx.textAlign = "left";
     }
@@ -1433,14 +1462,13 @@
     }
 
     // 수업 블록
-    var span = H.DAY_END_MIN - H.DAY_START_MIN;
     plan.cols.forEach(function (c, i) {
       H.layout(c.items).forEach(function (p) {
         var l = p.item;
         var color = H.blockColorOf(l, state.view);
         var laneW = (plan.colW - 4) / p.lanes;
         var x = gridX + i * plan.colW + 2 + p.lane * laneW;
-        var y = bodyY + ((l.start_min - H.DAY_START_MIN) / span) * bodyH;
+        var y = bodyY + ((l.start_min - range.from) / span) * bodyH;
         var bh = ((l.end_min - l.start_min) / span) * bodyH;
         var bw = laneW - 2;
 
