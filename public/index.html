@@ -351,20 +351,32 @@
     max-height: 148px;
     overflow: auto;
   }
-  .picklist .check { border-bottom: var(--line-w) solid var(--line); }
-  .picklist .check:last-child { border-bottom: none; }
+  .picklist label.check { border-bottom: var(--line-w) solid var(--line); }
+  .picklist label.check:last-child { border-bottom: none; }
   .picklist .none { padding: 10px; font-size: 12.5px; color: var(--ink-soft); }
 
-  .check {
+  /* `.field label` 이 display:block 에 작은 회색 글씨라, 특이도를 올려서 되돌린다.
+     label.check 로 안 쓰면 이 줄이 통째로 덮어씌워진다. */
+  label.check {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin: 0;
     padding: 7px 10px;
     font-size: 13.5px;
+    font-weight: 400;
+    color: var(--ink);
     cursor: pointer;
   }
-  .check input { margin: 0; accent-color: var(--accent); }
-  .check .left { color: var(--ink-soft); font-size: 12px; margin-left: auto; }
+  label.check input { margin: 0; flex: none; accent-color: var(--accent); }
+  label.check .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 이름에서 20px 띄우고 작은 글씨로 (위 gap 8px + 여기 12px) */
+  label.check .left {
+    flex: none;
+    margin-left: 12px;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+  }
 
   /* 온라인 표시 — 학생 이름 왼쪽에 붙는 작은 무선 기호 */
   .wifi { flex: none; vertical-align: -1px; margin-right: 3px; }
@@ -482,8 +494,8 @@
         <select id="f-teacher"></select>
       </div>
       <div class="field">
-        <label for="f-online-wrap">온라인 수업</label>
-        <label class="check" id="f-online-wrap">
+        <label>온라인 수업</label>
+        <label class="check">
           <input type="checkbox" id="f-online" />
           <span>온라인으로 진행</span>
         </label>
@@ -1240,7 +1252,8 @@
       var tag = left < 0 ? "초과 " + toDurationLabel(-left) : "잔여 " + toDurationLabel(left);
       return '<label class="check"><input type="checkbox" value="' + esc(s.id) + '"' +
         (picked.indexOf(s.id) >= 0 ? " checked" : "") + " />" +
-        "<span>" + esc(s.name) + '</span><span class="left">' + tag + "</span></label>";
+        '<span class="who">' + esc(s.name) + '</span>' +
+        '<span class="left">' + tag + "</span></label>";
     }).join("");
   }
 
