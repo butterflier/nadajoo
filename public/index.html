@@ -533,6 +533,39 @@
   var KIND_FALLBACK = { bg: "#F4F5F7", line: "#DEE2E7", ink: "#1B1D21" };
   var colorOf = function (kind) { return KIND_COLOR[kind] || KIND_FALLBACK; };
 
+  /* 학생별 색. 날짜별 뷰는 칸이 선생님이라, 한 학생이 하루 동안 어디를
+     오가는지 색으로 따라갈 수 있게 한다. 모두 같은 밝기로 맞춰 두었다. */
+  var STUDENT_PALETTE = [
+    { bg: "#EDF3FE", line: "#BBD0F7", ink: "#1B3F8F" },
+    { bg: "#EDF7F0", line: "#BFDEC9", ink: "#1F5B36" },
+    { bg: "#FDF6EA", line: "#E8D6AE", ink: "#7A5E1B" },
+    { bg: "#FDEFF0", line: "#F0C7CA", ink: "#8E2F38" },
+    { bg: "#F4F0FB", line: "#D4C6EC", ink: "#4C3585" },
+    { bg: "#EAF6F5", line: "#B7DCD8", ink: "#1C5B55" },
+    { bg: "#FEF1E8", line: "#F2CDB0", ink: "#8A4A1C" },
+    { bg: "#EFF1FB", line: "#C6CCEF", ink: "#333B85" },
+    { bg: "#F3F7E9", line: "#D3E0B4", ink: "#4E6320" },
+    { bg: "#FCEFF7", line: "#EBC5DD", ink: "#852D68" },
+    { bg: "#EAF4FA", line: "#BBD8E9", ink: "#14506E" },
+    { bg: "#F6F1EC", line: "#DCCBBA", ink: "#6B4A2E" }
+  ];
+
+  /** 학생 ID에서 색을 뽑는다 — 목록 순서가 바뀌어도 같은 학생은 같은 색이다. */
+  function studentColorOf(id) {
+    var h = 0;
+    for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return STUDENT_PALETTE[h % STUDENT_PALETTE.length];
+  }
+
+  /**
+   * 블록 색은 보는 뷰에 따라 다르다.
+   *  - 선생님별: 선생님이 하나로 고정이라 수업종류가 궁금하다
+   *  - 날짜별:   칸이 선생님이라 어느 학생인지가 궁금하다
+   */
+  function blockColorOf(lesson, view) {
+    return view === "date" ? studentColorOf(lesson.student_id) : colorOf(lesson.kind);
+  }
+
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -817,7 +850,7 @@
         '" data-col="' + esc(c.key) + '" style="height:' + HOURS * 54 + 'px;">';
       layout(byCol[c.key]).forEach(function (p) {
         var l = p.item;
-        var color = colorOf(l.kind);
+        var color = blockColorOf(l, state.view);
         var height = topPct(l.end_min) - topPct(l.start_min);
         var width = 100 / p.lanes;
         var mins = l.end_min - l.start_min;
@@ -1140,6 +1173,7 @@
   // ── 시작 ────────────────────────────────────────
   window.__nadajoo = { state: state, render: render, load: load, helpers: {
     toTimeLabel: toTimeLabel, colorOf: colorOf, layout: layout, topPct: topPct,
+    studentColorOf: studentColorOf, blockColorOf: blockColorOf,
     DAY_START_MIN: DAY_START_MIN, DAY_END_MIN: DAY_END_MIN, HOURS: HOURS,
     DOW_LABELS: DOW_LABELS, addDays: addDays, dowOf: dowOf, parseDate: parseDate,
     mmdd: mmdd, esc: esc, teacherColumns: teacherColumns, dateColumns: dateColumns
@@ -1175,7 +1209,7 @@
   var HEAD_H = 42;
   var TIME_W = 54;
   var HOUR_H = 48;
-  var LEGEND_H = 24;
+  var LEGEND_ROW_H = 20;
 
   var LINE = "#DEE2E7";
   var LINE_SOFT = "#F1F3F5";
@@ -1212,7 +1246,14 @@
             items: lessons.filter(function (l) { return l.date === state.day && l.teacher === t; }),
             second: function (l) { return l.kind; }
           };
-        })
+        }),
+        // 칸이 선생님이므로 색은 학생을 가리킨다 — 그날 나오는 학생만 싣는다
+        legend: dedupe(
+          lessons.filter(function (l) { return l.date === state.day; }),
+          function (l) { return l.student_id; }
+        ).map(function (l) {
+          return { label: l.student_name, color: H.studentColorOf(l.student_id) };
+        }).sort(function (a, b) { return a.label.localeCompare(b.label, "ko"); })
       };
     }
     var cols = [];
@@ -1230,8 +1271,41 @@
       title: state.teacher + " 선생님 · " + state.weekStart + " ~ " + H.addDays(state.weekStart, 6),
       file: "나다주_" + state.teacher + "선생님_" + state.weekStart + "~" + H.addDays(state.weekStart, 6) + ".png",
       colW: 136,
-      cols: cols
+      cols: cols,
+      legend: state.data.kinds.map(function (kind) {
+        return { label: kind, color: H.colorOf(kind) };
+      })
     };
+  }
+
+  /** 같은 키가 처음 나온 것만 남긴다. */
+  function dedupe(list, keyOf) {
+    var seen = {};
+    return list.filter(function (it) {
+      var k = keyOf(it);
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+  }
+
+  /** 범례 항목을 주어진 폭 안에서 줄 단위로 접는다. 최소 한 줄은 낸다. */
+  function packLegend(items, maxWidth) {
+    var measure = document.createElement("canvas").getContext("2d");
+    measure.font = font(400, 11.5);
+
+    var rows = [[]];
+    var used = 0;
+    (items || []).forEach(function (it) {
+      var width = 16 + measure.measureText(it.label).width + 16;
+      if (used && used + width > maxWidth) {
+        rows.push([]);
+        used = 0;
+      }
+      rows[rows.length - 1].push({ label: it.label, color: it.color, width: width });
+      used += width;
+    });
+    return rows;
   }
 
   function roundRect(ctx, x, y, w, h, r) {
@@ -1259,7 +1333,11 @@
     var plan = currentPlan();
     var bodyH = H.HOURS * HOUR_H;
     var w = PAD * 2 + TIME_W + plan.colW * plan.cols.length;
-    var h = PAD * 2 + TITLE_H + HEAD_H + bodyH + LEGEND_H;
+
+    // 범례 항목이 많으면(학생이 여럿이면) 여러 줄로 접힌다. 줄 수를 먼저 세야
+    // 캔버스 높이를 정할 수 있다.
+    var rows = packLegend(plan.legend, w - PAD * 2);
+    var h = PAD * 2 + TITLE_H + HEAD_H + bodyH + rows.length * LEGEND_ROW_H + 4;
 
     var canvas = document.getElementById("png-canvas");
     canvas.width = w * SCALE;
@@ -1359,7 +1437,7 @@
     plan.cols.forEach(function (c, i) {
       H.layout(c.items).forEach(function (p) {
         var l = p.item;
-        var color = H.colorOf(l.kind);
+        var color = H.blockColorOf(l, state.view);
         var laneW = (plan.colW - 4) / p.lanes;
         var x = gridX + i * plan.colW + 2 + p.lane * laneW;
         var y = bodyY + ((l.start_min - H.DAY_START_MIN) / span) * bodyH;
@@ -1408,22 +1486,24 @@
       });
     });
 
-    // 범례 — 색이 무슨 종류인지 PNG만 봐도 알 수 있게
-    var lx = PAD;
-    var ly = bodyY + bodyH + 17;
-    state.data.kinds.forEach(function (kind) {
-      var color = H.colorOf(kind);
-      ctx.fillStyle = color.bg;
-      ctx.strokeStyle = color.line;
-      ctx.lineWidth = 1.4;
-      roundRect(ctx, lx, ly - 8, 11, 11, 3);
-      ctx.fill();
-      ctx.stroke();
+    // 범례 — PNG만 봐도 색이 무슨 뜻인지 알 수 있게.
+    // 선생님별 뷰는 수업종류, 날짜별 뷰는 그날 나오는 학생이다.
+    ctx.font = font(400, 11.5);
+    rows.forEach(function (row, r) {
+      var lx = PAD;
+      var ly = bodyY + bodyH + 17 + r * LEGEND_ROW_H;
+      row.forEach(function (it) {
+        ctx.fillStyle = it.color.bg;
+        ctx.strokeStyle = it.color.line;
+        ctx.lineWidth = 1.4;
+        roundRect(ctx, lx, ly - 8, 11, 11, 3);
+        ctx.fill();
+        ctx.stroke();
 
-      ctx.fillStyle = INK_SOFT;
-      ctx.font = font(400, 11.5);
-      ctx.fillText(kind, lx + 16, ly + 1);
-      lx += 16 + ctx.measureText(kind).width + 16;
+        ctx.fillStyle = INK_SOFT;
+        ctx.fillText(it.label, lx + 16, ly + 1);
+        lx += it.width;
+      });
     });
 
     return { canvas: canvas, file: plan.file };
