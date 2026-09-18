@@ -6,7 +6,7 @@
  */
 
 /** 이 학원의 선생님. 늘리거나 이름을 바꾸려면 여기 한 줄만 고친다. */
-export const TEACHERS = ["타카하시", "가와구치", "김혜진", "스도"] as const;
+export const TEACHERS = ["타카하시", "가와구치", "김혜진", "스도", "표지연"] as const;
 export type Teacher = (typeof TEACHERS)[number];
 
 /** 수업종류. 겹침 안내 문구에 그대로 들어간다. */

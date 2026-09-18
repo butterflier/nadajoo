@@ -702,7 +702,7 @@
       renderGrid(dateColumns(), function (l) {
         return l.date === state.day ? l.teacher : null;
       });
-      $("hint").textContent = "선생님 네 분을 하루 단위로 나란히 봅니다. 빈 칸을 누르면 그 선생님으로 등록 창이 열립니다.";
+      $("hint").textContent = "선생님들을 하루 단위로 나란히 봅니다. 빈 칸을 누르면 그 선생님으로 등록 창이 열립니다.";
     } else {
       renderStudents();
       $("hint").textContent = "잔여 시간은 저장하지 않고 매번 계산합니다 — 수업일 00시가 지나면 차감된 것으로 봅니다. 학생을 누르면 시간 조정과 메모를 할 수 있습니다.";
@@ -727,7 +727,7 @@
     return cols;
   }
 
-  /** 날짜별 선생님뷰 — 선생님 4칸. */
+  /** 날짜별 선생님뷰 — 선생님 한 분이 한 칸. */
   function dateColumns() {
     return state.data.teachers.map(function (t) {
       var count = (state.data.lessons || []).filter(function (l) {
