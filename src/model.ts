@@ -9,8 +9,8 @@
 export const TEACHERS = ["타카하시", "가와구치", "김혜진", "스도", "표지연"] as const;
 export type Teacher = (typeof TEACHERS)[number];
 
-/** 수업종류. 겹침 안내 문구에 그대로 들어간다. */
-export const KINDS = ["본고사", "면접", "지유서"] as const;
+/** 수업종류. 겹침 안내 문구와 블록 첫 줄에 그대로 들어간다. */
+export const KINDS = ["본고사", "면접", "지유서", "일본어", "소논문"] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** 요일 인덱스는 월=0 … 일=6. JS Date.getDay()(일=0)와 다르니 항상 변환해서 쓴다. */
@@ -48,9 +48,26 @@ export interface Lesson {
   memo: string | null;
 }
 
+/**
+ * 수업을 넣을 수 없는 시간 — 정규수업, 휴가, 연휴 같은 것.
+ *
+ * 학생이 없으니 잔여 시간과는 무관하다. 격자에 회색으로 깔려서
+ * "여기엔 개인수업을 넣을 수 없다"는 것만 보여 준다.
+ */
+export interface Block {
+  id: string;
+  teacher: Teacher | null; // null이면 선생님 전체 (연휴처럼)
+  title: string;           // 사유 — 정규수업 / 추석연휴 / 휴가 …
+  date: string;            // YYYY-MM-DD
+  start_min: number;
+  end_min: number;
+  memo: string | null;
+}
+
 /** 저장 직전의 값 — 아직 ID가 없다. */
 export type StudentInput = Omit<Student, "id">;
 export type LessonInput = Omit<Lesson, "id">;
+export type BlockInput = Omit<Block, "id">;
 
 // ── 시각 ────────────────────────────────────────────
 
@@ -155,7 +172,13 @@ export function balanceOf(student: Student, lessons: Lesson[], today: string): B
 
 // ── 겹침 ────────────────────────────────────────────
 
-const overlaps = (a: Lesson | LessonInput, b: Lesson) =>
+interface Span {
+  date: string;
+  start_min: number;
+  end_min: number;
+}
+
+const overlaps = (a: Span, b: Span) =>
   a.date === b.date && a.start_min < b.end_min && b.start_min < a.end_min;
 
 /**
@@ -168,11 +191,13 @@ const overlaps = (a: Lesson | LessonInput, b: Lesson) =>
 export interface Conflicts {
   student: Lesson | null;
   teacher: Lesson | null;
+  blocked: Block | null;
 }
 
 export function findConflicts(
   candidate: Lesson | LessonInput,
   lessons: Lesson[],
+  blocks: Block[] = [],
   ignoreId?: string,
 ): Conflicts {
   let student: Lesson | null = null;
@@ -183,7 +208,17 @@ export function findConflicts(
     if (!student && l.student_id === candidate.student_id) student = l;
     if (!teacher && l.teacher === candidate.teacher) teacher = l;
   }
-  return { student, teacher };
+
+  // 선생님을 비운 수업불가(연휴 등)는 모두에게 걸린다
+  let blocked: Block | null = null;
+  for (const b of blocks) {
+    if (b.teacher !== null && b.teacher !== candidate.teacher) continue;
+    if (!overlaps(candidate, b)) continue;
+    blocked = b;
+    break;
+  }
+
+  return { student, teacher, blocked };
 }
 
 /** 겹침 안내 문구. 선생님 이름 뒤에 T를 붙인다 — "표지연T 본고사 수업이 …". */
@@ -239,6 +274,31 @@ export function parseLesson(
     content: text(body.content),
     memo: text(body.memo),
   };
+}
+
+/** 폼에서 온 값을 수업불가로. */
+export function parseBlock(body: Record<string, unknown>): BlockInput | string {
+  const title = text(body.title);
+  if (!title) return "사유를 입력해 주세요. (예: 정규수업, 휴가)";
+
+  // 빈 값이면 선생님 전체에 걸린다
+  const rawTeacher = text(body.teacher);
+  if (rawTeacher !== null && !isTeacher(rawTeacher)) return "선생님을 확인해 주세요.";
+  const teacher = rawTeacher as Teacher | null;
+
+  const date = text(body.date);
+  if (!date || !parseDate(date)) return "날짜를 확인해 주세요.";
+
+  const start = typeof body.start_min === "number" ? body.start_min : null;
+  const end = typeof body.end_min === "number" ? body.end_min : null;
+  if (start === null || end === null) return "시간을 확인해 주세요.";
+  if (end <= start) return "종료 시간은 시작 시간보다 늦어야 합니다.";
+  if (start < DAY_START_MIN || end > DAY_END_MIN) {
+    return "시간은 " + toTimeLabel(DAY_START_MIN) + " 부터 " + toTimeLabel(DAY_END_MIN) + " 사이여야 합니다.";
+  }
+  if (start % 5 || end % 5) return "시간은 5분 단위로 입력해 주세요.";
+
+  return { teacher, title, date, start_min: start, end_min: end, memo: text(body.memo) };
 }
 
 /** 폼에서 온 값을 학생으로. */

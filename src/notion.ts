@@ -16,6 +16,8 @@ import {
   type Kind,
   type Lesson,
   type LessonInput,
+  type Block,
+  type BlockInput,
   type Student,
   type StudentInput,
   type Teacher,
@@ -46,10 +48,21 @@ const L = {
   memo: "메모",
 } as const;
 
+/** 수업불가 데이터베이스의 속성 이름. */
+const B = {
+  title: "사유",
+  teacher: "선생님",
+  date: "날짜",
+  start: "시작",
+  end: "종료",
+  memo: "메모",
+} as const;
+
 export interface NotionEnv {
   NOTION_TOKEN?: string;
   NOTION_STUDENT_DB?: string;
   NOTION_LESSON_DB?: string;
+  NOTION_BLOCK_DB?: string;
 }
 
 export class NotionError extends Error {
@@ -58,7 +71,12 @@ export class NotionError extends Error {
   }
 }
 
-function config(env: NotionEnv): { token: string; studentDb: string; lessonDb: string } {
+function config(env: NotionEnv): {
+  token: string;
+  studentDb: string;
+  lessonDb: string;
+  blockDb: string | null;
+} {
   if (!env.NOTION_TOKEN || !env.NOTION_STUDENT_DB || !env.NOTION_LESSON_DB) {
     throw new NotionError(
       "서버에 NOTION_TOKEN / NOTION_STUDENT_DB / NOTION_LESSON_DB 가 설정되어 있지 않습니다.",
@@ -69,7 +87,21 @@ function config(env: NotionEnv): { token: string; studentDb: string; lessonDb: s
     token: env.NOTION_TOKEN,
     studentDb: env.NOTION_STUDENT_DB,
     lessonDb: env.NOTION_LESSON_DB,
+    // 수업불가는 나중에 붙인 기능이라, 없어도 앱은 그대로 돈다
+    blockDb: env.NOTION_BLOCK_DB || null,
   };
+}
+
+/** 수업불가 데이터베이스가 설정돼 있어야만 하는 곳에서 쓴다. */
+function blockDbOf(env: NotionEnv): string {
+  const { blockDb } = config(env);
+  if (!blockDb) {
+    throw new NotionError(
+      "서버에 NOTION_BLOCK_DB 가 설정되어 있지 않습니다. (wrangler secret put NOTION_BLOCK_DB)",
+      500,
+    );
+  }
+  return blockDb;
 }
 
 async function call(
@@ -304,5 +336,81 @@ export async function updateLesson(
 }
 
 export async function archiveLesson(env: NotionEnv, id: string): Promise<void> {
+  await call(env, "/pages/" + id, { method: "PATCH", body: { archived: true } });
+}
+
+// ── 수업불가 ────────────────────────────────────
+
+/** 필수 값(사유·날짜·시각)이 비었거나 깨졌으면 null. 선생님은 비어 있을 수 있다. */
+function toBlock(page: any): Block | null {
+  const props = page?.properties ?? {};
+
+  const title = readText(props[B.title]);
+  if (!title) return null;
+
+  const startMin = parseTimeLabel(readText(props[B.start]) ?? "");
+  const endMin = parseTimeLabel(readText(props[B.end]) ?? "");
+  if (startMin === null || endMin === null || endMin <= startMin) return null;
+
+  const rawDate = props[B.date]?.date?.start;
+  const date = rawDate ? String(rawDate).slice(0, 10) : null;
+  if (!date || !parseDate(date)) return null;
+
+  // 비어 있거나 모르는 이름이면 선생님 전체로 본다
+  const teacherName = readSelect(props[B.teacher]);
+  const teacher = isTeacher(teacherName) ? teacherName : null;
+
+  return {
+    id: page.id,
+    teacher,
+    title,
+    date,
+    start_min: startMin,
+    end_min: endMin,
+    memo: readText(props[B.memo]),
+  };
+}
+
+function blockProperties(block: BlockInput) {
+  return {
+    [B.title]: { title: [{ text: { content: block.title } }] },
+    [B.teacher]: block.teacher ? { select: { name: block.teacher } } : { select: null },
+    [B.date]: { date: { start: block.date } },
+    [B.start]: writeText(toTimeLabel(block.start_min)),
+    [B.end]: writeText(toTimeLabel(block.end_min)),
+    [B.memo]: writeText(block.memo),
+  };
+}
+
+/** 수업불가 DB를 안 붙였으면 빈 목록 — 기능을 쓰기 전에도 앱이 돈다. */
+export async function listBlocks(env: NotionEnv): Promise<Block[]> {
+  const { blockDb } = config(env);
+  if (!blockDb) return [];
+
+  const blocks: Block[] = [];
+  for (const row of await queryAll(env, blockDb)) {
+    const block = toBlock(row);
+    if (block) blocks.push(block);
+  }
+  blocks.sort((a, b) => a.date.localeCompare(b.date) || a.start_min - b.start_min);
+  return blocks;
+}
+
+export async function createBlock(env: NotionEnv, block: BlockInput): Promise<string> {
+  const page: any = await call(env, "/pages", {
+    method: "POST",
+    body: { parent: { database_id: blockDbOf(env) }, properties: blockProperties(block) },
+  });
+  return page.id;
+}
+
+export async function updateBlock(env: NotionEnv, id: string, block: BlockInput): Promise<void> {
+  await call(env, "/pages/" + id, {
+    method: "PATCH",
+    body: { properties: blockProperties(block) },
+  });
+}
+
+export async function archiveBlock(env: NotionEnv, id: string): Promise<void> {
   await call(env, "/pages/" + id, { method: "PATCH", body: { archived: true } });
 }

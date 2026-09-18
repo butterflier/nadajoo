@@ -244,6 +244,10 @@
   .lesson.tiny .who, .lesson.tiny .when { display: none; }
   .lesson.tiny .t { font-size: 12px; margin: 0; }
 
+  /* 수업불가 — 수업이 아니라 바탕에 가깝게, 수업 블록보다 아래에 깐다 */
+  .lesson.blocked { z-index: 5; }
+  .lesson.blocked .t { font-weight: 600; font-size: 12px; }
+
   .empty {
     padding: 34px 16px;
     text-align: center;
@@ -397,6 +401,7 @@
     <button class="btn" type="button" id="btn-refresh">새로고침</button>
     <button class="btn" type="button" id="btn-png">PNG 저장</button>
     <button class="btn" type="button" id="btn-new-student">학생 등록</button>
+    <button class="btn" type="button" id="btn-new-block">수업불가 추가</button>
     <button class="btn primary" type="button" id="btn-new-lesson">수업 등록</button>
   </div>
 
@@ -491,6 +496,63 @@
   </form>
 </div>
 
+<div class="scrim" id="scrim-block" hidden>
+  <form class="modal" id="form-block">
+    <h2 id="block-title">수업불가 추가</h2>
+    <p class="hint" style="margin-top: 0;">정규수업·휴가·연휴처럼 개인수업을 넣을 수 없는 시간입니다. 학생이 없으니 잔여 시간은 깎이지 않습니다.</p>
+
+    <div class="row">
+      <div class="field">
+        <label for="b-teacher">선생님</label>
+        <select id="b-teacher"></select>
+      </div>
+      <div class="field">
+        <label for="b-title">사유</label>
+        <input type="text" id="b-title" autocomplete="off" placeholder="예: 정규수업, 휴가" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="b-date">날짜</label>
+        <input type="date" id="b-date" />
+      </div>
+      <div class="field">
+        <label for="b-start">시작</label>
+        <input type="time" id="b-start" step="300" />
+      </div>
+      <div class="field">
+        <label for="b-end">종료</label>
+        <input type="time" id="b-end" step="300" />
+      </div>
+    </div>
+
+    <div class="field" id="b-repeat-field">
+      <label for="b-repeat">몇 주 반복할까요</label>
+      <select id="b-repeat">
+        <option value="1">반복 없이 이 날만</option>
+        <option value="2">2주</option>
+        <option value="4">4주</option>
+        <option value="8">8주</option>
+        <option value="12">12주</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="b-memo">메모</label>
+      <textarea id="b-memo"></textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn primary" type="submit" id="b-save">저장</button>
+      <button class="btn danger" type="button" id="b-delete" hidden>삭제</button>
+      <span class="spacer"></span>
+      <button class="btn" type="button" id="b-cancel">닫기</button>
+    </div>
+    <div class="msg" id="block-msg"></div>
+  </form>
+</div>
+
 <div class="scrim" id="scrim-student" hidden>
   <form class="modal" id="form-student">
     <h2 id="student-title">학생 등록</h2>
@@ -548,8 +610,13 @@
   var KIND_COLOR = {
     "본고사": { bg: "#EDF3FE", line: "#BBD0F7", ink: "#1B3F8F" },
     "면접":   { bg: "#EDF7F0", line: "#BFDEC9", ink: "#1F5B36" },
-    "지유서": { bg: "#FDF6EA", line: "#E8D6AE", ink: "#7A5E1B" }
+    "지유서": { bg: "#FDF6EA", line: "#E8D6AE", ink: "#7A5E1B" },
+    "일본어": { bg: "#F6F1EC", line: "#DCCBBA", ink: "#6B4A2E" },
+    "소논문": { bg: "#F4F0FB", line: "#D4C6EC", ink: "#4C3585" }
   };
+
+  /* 수업불가(정규수업·휴가)는 수업이 아니므로 색을 빼고 회색으로 깐다. */
+  var BLOCK_COLOR = { bg: "#F1F3F5", line: "#DEE2E7", ink: "#6B7280" };
   var KIND_FALLBACK = { bg: "#F4F5F7", line: "#DEE2E7", ink: "#1B1D21" };
   var colorOf = function (kind) { return KIND_COLOR[kind] || KIND_FALLBACK; };
 
@@ -634,6 +701,7 @@
     data: null,
     editingLesson: null,
     editingStudent: null,
+    editingBlock: null,
     kind: null
   };
 
@@ -865,9 +933,30 @@
     }
     html += "</div>";
 
+    var blocks = state.data.blocks || [];
+
     cols.forEach(function (c) {
       html += '<div class="col' + (c.weekend ? " weekend" : "") +
         '" data-col="' + esc(c.key) + '" style="height:' + HOURS * 54 + 'px;">';
+
+      // 수업불가를 먼저, 칸 전체 폭에 깐다 — 수업과 자리를 나눠 갖지 않는다
+      blocks.forEach(function (b) {
+        if (b.date !== c.date) return;
+        if (b.teacher !== null && b.teacher !== c.teacher) return;
+        var mins = b.end_min - b.start_min;
+        var size = mins < 40 ? " tiny" : mins < 70 ? " short" : "";
+        html += '<button class="lesson blocked' + size + '" type="button" data-block="' + esc(b.id) + '"' +
+          ' style="top:' + topPct(b.start_min) + "%; height:" + (topPct(b.end_min) - topPct(b.start_min)) + "%;" +
+          " left: 0; width: calc(100% - 3px);" +
+          " background:" + BLOCK_COLOR.bg + "; border-color:" + BLOCK_COLOR.line +
+          "; color:" + BLOCK_COLOR.ink + ';"' +
+          ' title="' + esc(b.title + " · " + toTimeLabel(b.start_min) + "–" + toTimeLabel(b.end_min) +
+            (b.teacher ? "" : " · 선생님 전체") + (b.memo ? " · " + b.memo : "")) + '">' +
+          '<span class="when">' + toTimeLabel(b.start_min) + "–" + toTimeLabel(b.end_min) + "</span>" +
+          '<span class="t">' + esc(b.title) + "</span>" +
+          "</button>";
+      });
+
       layout(byCol[c.key]).forEach(function (p) {
         var l = p.item;
         var color = blockColorOf(l, state.view);
@@ -900,10 +989,16 @@
 
   // 격자 클릭 — 블록이면 수정, 빈 곳이면 그 시각으로 등록
   $("sheet").addEventListener("click", function (e) {
-    var block = e.target.closest("button[data-lesson]");
-    if (block) {
-      var lesson = (state.data.lessons || []).find(function (l) { return l.id === block.dataset.lesson; });
+    var hit = e.target.closest("button[data-lesson]");
+    if (hit) {
+      var lesson = (state.data.lessons || []).find(function (l) { return l.id === hit.dataset.lesson; });
       if (lesson) openLesson(lesson, null);
+      return;
+    }
+    var blockHit = e.target.closest("button[data-block]");
+    if (blockHit) {
+      var found = (state.data.blocks || []).find(function (b) { return b.id === blockHit.dataset.block; });
+      if (found) openBlock(found, null);
       return;
     }
     var col = e.target.closest(".col");
@@ -1103,6 +1198,112 @@
     }
   });
 
+  // ── 수업불가 창 ─────────────────────────────────
+  var ALL_TEACHERS = "__all__";
+
+  function openBlock(block, prefill) {
+    state.editingBlock = block;
+    var base = block || prefill || {};
+
+    $("block-title").textContent = block ? "수업불가 수정" : "수업불가 추가";
+    $("b-teacher").innerHTML =
+      '<option value="' + ALL_TEACHERS + '">선생님 전체</option>' +
+      state.data.teachers.map(function (t) {
+        return '<option value="' + esc(t) + '">' + esc(t) + " 선생님</option>";
+      }).join("");
+    $("b-teacher").value = base.teacher || (block ? ALL_TEACHERS : state.teacher);
+
+    $("b-title").value = base.title || "";
+    $("b-date").value = base.date || state.data.today;
+    $("b-start").value = toTimeLabel(base.start_min != null ? base.start_min : 14 * 60);
+    $("b-end").value = toTimeLabel(base.end_min != null ? base.end_min : 16 * 60);
+    $("b-memo").value = base.memo || "";
+    $("b-repeat").value = "1";
+    $("b-repeat-field").hidden = !!block;   // 수정할 때는 반복이 의미가 없다
+    $("b-delete").hidden = !block;
+    $("block-msg").textContent = "";
+    $("scrim-block").hidden = false;
+    $("b-title").focus();
+  }
+
+  var closeBlock = function () { $("scrim-block").hidden = true; state.editingBlock = null; };
+  $("b-cancel").addEventListener("click", closeBlock);
+  $("scrim-block").addEventListener("mousedown", function (e) { if (e.target === $("scrim-block")) closeBlock(); });
+
+  $("btn-new-block").addEventListener("click", function () {
+    var weekEnd = addDays(state.weekStart, 6);
+    var inWeek = state.data.today >= state.weekStart && state.data.today <= weekEnd;
+    openBlock(null, {
+      teacher: state.view === "date" ? null : state.teacher,
+      date: state.view === "date" ? state.day : (inWeek ? state.data.today : state.weekStart)
+    });
+  });
+
+  function collectBlock() {
+    var start = toMin($("b-start").value);
+    var end = toMin($("b-end").value);
+    if (start === null || end === null) return "시간을 확인해 주세요.";
+    if (end <= start) return "종료 시간은 시작 시간보다 늦어야 합니다.";
+    if (start < DAY_START_MIN || end > DAY_END_MIN) {
+      return "시간은 " + toTimeLabel(DAY_START_MIN) + " 부터 24:00 사이여야 합니다.";
+    }
+    if (!$("b-title").value.trim()) return "사유를 입력해 주세요. (예: 정규수업, 휴가)";
+    if (!$("b-date").value) return "날짜를 입력해 주세요.";
+    var teacher = $("b-teacher").value;
+    return {
+      teacher: teacher === ALL_TEACHERS ? "" : teacher,
+      title: $("b-title").value.trim(),
+      date: $("b-date").value,
+      start_min: start,
+      end_min: end,
+      memo: $("b-memo").value.trim()
+    };
+  }
+
+  $("form-block").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var collected = collectBlock();
+    if (typeof collected === "string") { $("block-msg").textContent = collected; return; }
+
+    $("b-save").disabled = true;
+    try {
+      var skipped = 0;
+      if (state.editingBlock) {
+        await saveOne("/api/blocks/" + state.editingBlock.id, "PUT", collected);
+      } else {
+        var weeks = Number($("b-repeat").value) || 1;
+        for (var i = 0; i < weeks; i++) {
+          var one = Object.assign({}, collected, { date: addDays(collected.date, i * 7) });
+          var r = await saveOne("/api/blocks", "POST", one);
+          if (r.skipped) skipped++;
+        }
+      }
+      closeBlock();
+      await load();
+      if (skipped) banner(skipped + "주치는 건너뛰었습니다.");
+    } catch (err) {
+      $("block-msg").textContent = err.message;
+    } finally {
+      $("b-save").disabled = false;
+    }
+  });
+
+  $("b-delete").addEventListener("click", async function () {
+    var block = state.editingBlock;
+    if (!block) return;
+    if (!confirm(block.date + " " + block.title + " 을(를) 삭제할까요?")) return;
+    $("b-delete").disabled = true;
+    try {
+      await api("/api/blocks/" + block.id, "DELETE", {});
+      closeBlock();
+      await load();
+    } catch (err) {
+      $("block-msg").textContent = err.message;
+    } finally {
+      $("b-delete").disabled = false;
+    }
+  });
+
   // ── 학생 창 ─────────────────────────────────────
   function openStudent(student) {
     state.editingStudent = student;
@@ -1212,6 +1413,7 @@
     if (e.key !== "Escape") return;
     if (!$("scrim-lesson").hidden) closeLesson();
     if (!$("scrim-student").hidden) closeStudent();
+    if (!$("scrim-block").hidden) closeBlock();
   });
 
   // ── 시작 ────────────────────────────────────────
@@ -1255,6 +1457,10 @@
   var HOUR_H = 56;
   var LEGEND_ROW_H = 20;
 
+  var BLOCK_BG = "#F1F3F5";
+  var BLOCK_LINE = "#DEE2E7";
+  var BLOCK_INK = "#6B7280";
+
   var LINE = "#DEE2E7";
   var LINE_SOFT = "#F1F3F5";
   var INK = "#1B1D21";
@@ -1275,6 +1481,13 @@
     } catch (e) { /* 폰트를 못 불러와도 그리기는 계속한다 */ }
   }
 
+  /** 그 칸(선생님·날짜)에 걸리는 수업불가. 선생님을 비운 것은 모두에게 걸린다. */
+  function blocksFor(teacher, date) {
+    return (state.data.blocks || []).filter(function (b) {
+      return b.date === date && (b.teacher === null || b.teacher === teacher);
+    });
+  }
+
   function currentPlan() {
     var lessons = state.data.lessons || [];
     if (state.view === "date") {
@@ -1288,6 +1501,7 @@
             sub: "",
             weekend: false,
             items: lessons.filter(function (l) { return l.date === state.day && l.teacher === t; }),
+            blocks: blocksFor(t, state.day),
             second: function (l) { return l.content || ""; }
           };
         }),
@@ -1308,6 +1522,7 @@
         sub: H.mmdd(label),
         weekend: i >= 5,
         items: lessons.filter(function (l) { return l.teacher === state.teacher && l.date === label; }),
+        blocks: blocksFor(state.teacher, label),
         second: function (l) { return l.content || ""; }
       });
     }
@@ -1399,7 +1614,7 @@
 
     // 수업이 있는 시간대만 그린다
     var all = [];
-    plan.cols.forEach(function (c) { all = all.concat(c.items); });
+    plan.cols.forEach(function (c) { all = all.concat(c.items, c.blocks || []); });
     var range = rangeOf(all);
     var hours = (range.to - range.from) / 60;
     var span = range.to - range.from;
@@ -1504,6 +1719,47 @@
       ctx.lineTo(x, bodyY + bodyH);
       ctx.stroke();
     }
+
+    // 수업불가를 먼저 — 칸 전체 폭에 깔리고, 수업이 그 위에 온다
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    plan.cols.forEach(function (c, i) {
+      (c.blocks || []).forEach(function (b) {
+        var x = gridX + i * plan.colW + 2;
+        var bw = plan.colW - 4;
+        var y = bodyY + ((b.start_min - range.from) / span) * bodyH;
+        var bh = ((b.end_min - b.start_min) / span) * bodyH;
+        var boxH = Math.max(bh - 2, 12);
+
+        ctx.fillStyle = BLOCK_BG;
+        ctx.strokeStyle = BLOCK_LINE;
+        ctx.lineWidth = 1.4;
+        roundRect(ctx, x, y + 1, bw, boxH, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.save();
+        roundRect(ctx, x, y + 1, bw, boxH, 4);
+        ctx.clip();
+        ctx.fillStyle = BLOCK_INK;
+        var lines = boxH >= 34
+          ? [
+              { text: H.toTimeLabel(b.start_min) + "–" + H.toTimeLabel(b.end_min), font: font(400, 10.5), lh: 14 },
+              { text: b.title, font: font(600, 12), lh: 16 }
+            ]
+          : [{ text: b.title, font: font(600, 11.5), lh: 14 }];
+        var total = lines.reduce(function (sum, ln) { return sum + ln.lh; }, 0);
+        var cursor = y + 1 + (boxH - total) / 2;
+        lines.forEach(function (ln) {
+          ctx.font = ln.font;
+          ctx.fillText(clip(ctx, ln.text, bw - 12), x + bw / 2, cursor + ln.lh / 2);
+          cursor += ln.lh;
+        });
+        ctx.restore();
+      });
+    });
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
 
     // 수업 블록
     plan.cols.forEach(function (c, i) {

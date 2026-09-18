@@ -13,22 +13,29 @@ import {
   balanceOf,
   conflictMessage,
   findConflicts,
+  parseBlock,
   parseLesson,
   parseStudent,
   toDurationLabel,
   todayInSeoul,
+  type Block,
+  type BlockInput,
   type Lesson,
   type LessonInput,
   type Student,
 } from "./model";
 import {
   NotionError,
+  archiveBlock,
   archiveLesson,
   archiveStudent,
+  createBlock,
   createLesson,
   createStudent,
+  listBlocks,
   listLessons,
   listStudents,
+  updateBlock,
   updateLesson,
   updateStudent,
   type NotionEnv,
@@ -86,16 +93,22 @@ async function readBody(request: Request): Promise<Record<string, unknown> | nul
 // isolate 안에서 짧게 캐시하되, 이 Worker를 통한 쓰기가 있으면 바로 버린다.
 
 const CACHE_MS = 20_000;
-let cache: { at: number; students: Student[]; lessons: Lesson[] } | null = null;
+interface Snapshot {
+  students: Student[];
+  lessons: Lesson[];
+  blocks: Block[];
+}
+let cache: ({ at: number } & Snapshot) | null = null;
 
-async function loadAll(env: Env): Promise<{ students: Student[]; lessons: Lesson[] }> {
+async function loadAll(env: Env): Promise<Snapshot> {
   if (cache && Date.now() - cache.at < CACHE_MS) {
-    return { students: cache.students, lessons: cache.lessons };
+    return { students: cache.students, lessons: cache.lessons, blocks: cache.blocks };
   }
   const students = await listStudents(env);
   const lessons = await listLessons(env, students);
-  cache = { at: Date.now(), students, lessons };
-  return { students, lessons };
+  const blocks = await listBlocks(env);
+  cache = { at: Date.now(), students, lessons, blocks };
+  return { students, lessons, blocks };
 }
 
 const dropCache = () => {
@@ -106,7 +119,7 @@ const dropCache = () => {
 
 /** 화면이 그릴 데이터 한 벌. 학생에는 계산된 잔여 시간을 붙여 보낸다. */
 async function handleData(env: Env): Promise<Response> {
-  const { students, lessons } = await loadAll(env);
+  const { students, lessons, blocks } = await loadAll(env);
   const today = todayInSeoul();
   return json({
     today,
@@ -114,6 +127,7 @@ async function handleData(env: Env): Promise<Response> {
     kinds: KINDS,
     students: students.map((s) => ({ ...s, balance: balanceOf(s, lessons, today) })),
     lessons,
+    blocks,
   });
 }
 
@@ -147,13 +161,30 @@ async function saveLesson(
   body: Record<string, unknown>,
   existingId: string | null,
 ): Promise<Response> {
-  const { students, lessons } = await loadAll(env);
+  const { students, lessons, blocks } = await loadAll(env);
 
   const parsed = parseLesson(body, students);
   if (typeof parsed === "string") return bad(parsed);
 
   const force = body.force === true;
-  const conflicts = findConflicts(parsed, lessons, existingId ?? undefined);
+  const conflicts = findConflicts(parsed, lessons, blocks, existingId ?? undefined);
+
+  // 정규수업이나 휴가가 깔려 있는 시간 — 학생 겹침보다 먼저 알려 준다
+  if (!force && conflicts.blocked) {
+    const b = conflicts.blocked;
+    return json(
+      {
+        conflict: {
+          type: "blocked",
+          message:
+            (b.teacher ? b.teacher + "T는" : "그 시간에는") + " " + b.title +
+            " 때문에 수업을 넣을 수 없는 시간입니다. 그래도 등록할까요?",
+          existing: b,
+        },
+      },
+      409,
+    );
+  }
 
   if (!force && conflicts.student) {
     return json(
@@ -202,6 +233,51 @@ async function saveLesson(
 
   dropCache();
   return json({ id, moved: moved?.id ?? null, warning });
+}
+
+/**
+ * 수업불가 저장. 이미 잡혀 있는 수업 위에 깔면 알려만 주고, 확인하면 그대로 깐다
+ * — 정규수업이 잡힌 걸 앱이 멋대로 지우면 안 된다.
+ */
+async function saveBlock(
+  env: Env,
+  body: Record<string, unknown>,
+  existingId: string | null,
+): Promise<Response> {
+  const parsed = parseBlock(body);
+  if (typeof parsed === "string") return bad(parsed);
+
+  if (body.force !== true) {
+    const { lessons } = await loadAll(env);
+    const hit = lessons.filter(
+      (l) =>
+        (parsed.teacher === null || l.teacher === parsed.teacher) &&
+        l.date === parsed.date &&
+        l.start_min < parsed.end_min &&
+        parsed.start_min < l.end_min,
+    );
+    if (hit.length) {
+      return json(
+        {
+          conflict: {
+            type: "lessons-under",
+            message:
+              "그 시간에 이미 수업이 " + hit.length + "건 있습니다 (" +
+              hit.map((l) => l.student_name).join(", ") + "). 그래도 수업불가로 둘까요?",
+            count: hit.length,
+          },
+        },
+        409,
+      );
+    }
+  }
+
+  let id = existingId;
+  if (existingId) await updateBlock(env, existingId, parsed as BlockInput);
+  else id = await createBlock(env, parsed as BlockInput);
+
+  dropCache();
+  return json({ id });
 }
 
 async function saveStudent(
@@ -273,6 +349,21 @@ export default {
       if (student) {
         if (method === "PUT") return await saveStudent(env, body ?? {}, student[1]);
         if (method === "DELETE") return await removeStudent(env, student[1], body?.force === true);
+        return bad("허용되지 않는 메서드입니다.", 405);
+      }
+
+      if (url.pathname === "/api/blocks") {
+        if (method === "POST") return await saveBlock(env, body ?? {}, null);
+        return bad("허용되지 않는 메서드입니다.", 405);
+      }
+      const block = url.pathname.match(new RegExp("^/api/blocks/" + ID_RE + "$"));
+      if (block) {
+        if (method === "PUT") return await saveBlock(env, body ?? {}, block[1]);
+        if (method === "DELETE") {
+          await archiveBlock(env, block[1]);
+          dropCache();
+          return json({ ok: true });
+        }
         return bad("허용되지 않는 메서드입니다.", 405);
       }
 

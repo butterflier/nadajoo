@@ -13,6 +13,7 @@
   //   NOTION_TOKEN        Notion 내부 통합 토큰 (ntn_...)
   //   NOTION_STUDENT_DB   "나다주 학생" 데이터베이스 ID
   //   NOTION_LESSON_DB    "나다주 수업" 데이터베이스 ID
+  //   NOTION_BLOCK_DB     "나다주 수업불가" 데이터베이스 ID (없으면 수업불가 기능만 꺼진다)
   "observability": {
     "enabled": true
   }
