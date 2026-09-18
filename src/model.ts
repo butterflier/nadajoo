@@ -185,9 +185,9 @@ export function findConflicts(
   return { student, teacher };
 }
 
-/** 겹침 안내 문구. 메모의 "[선생님이름] [수업종류] 수업이 이미 등록되어있습니다" 그대로. */
+/** 겹침 안내 문구. 선생님 이름 뒤에 T를 붙인다 — "표지연T 본고사 수업이 …". */
 export const conflictMessage = (existing: Lesson) =>
-  "[" + existing.teacher + "] [" + existing.kind + "] 수업이 이미 등록되어 있습니다. 수정할까요?";
+  existing.teacher + "T " + existing.kind + " 수업이 이미 등록되어 있습니다. 수정할까요?";
 
 // ── 검증 ────────────────────────────────────────────
 
