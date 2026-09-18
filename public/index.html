@@ -382,7 +382,8 @@
     <span class="spacer"></span>
     <button class="btn" type="button" id="btn-refresh">새로고침</button>
     <button class="btn" type="button" id="btn-png">PNG 저장</button>
-    <button class="btn primary" type="button" id="btn-new-student">학생 등록</button>
+    <button class="btn" type="button" id="btn-new-student">학생 등록</button>
+    <button class="btn primary" type="button" id="btn-new-lesson">수업 등록</button>
   </div>
 
   <div class="toolbar" id="bar-teacher">
@@ -1122,6 +1123,25 @@
   $("s-cancel").addEventListener("click", closeStudent);
   $("scrim-student").addEventListener("mousedown", function (e) { if (e.target === $("scrim-student")) closeStudent(); });
   $("btn-new-student").addEventListener("click", function () { openStudent(null); });
+
+  /**
+   * 툴바의 "수업 등록" — 격자를 누르지 않고도 열 수 있게.
+   * 지금 보고 있는 화면을 그대로 따라간다: 날짜별 뷰면 그 날, 선생님별 뷰면
+   * 고른 선생님과 (보고 있는 주에 오늘이 들어 있으면) 오늘.
+   */
+  $("btn-new-lesson").addEventListener("click", function () {
+    if (!state.data.students.length) {
+      alert("학생을 먼저 등록해 주세요.");
+      openStudent(null);
+      return;
+    }
+    var weekEnd = addDays(state.weekStart, 6);
+    var inWeek = state.data.today >= state.weekStart && state.data.today <= weekEnd;
+    openLesson(null, {
+      teacher: state.view === "date" ? state.data.teachers[0] : state.teacher,
+      date: state.view === "date" ? state.day : (inWeek ? state.data.today : state.weekStart)
+    });
+  });
 
   $("form-student").addEventListener("submit", async function (e) {
     e.preventDefault();
