@@ -131,21 +131,32 @@ async function handleData(env: Env): Promise<Response> {
   });
 }
 
-/** 잔여 시간이 모자라면 막지는 않고 알려만 준다 — 판단은 부원장이 한다. */
+/**
+ * 잔여 시간이 모자라면 막지는 않고 알려만 준다 — 판단은 부원장이 한다.
+ *
+ * 두 명이 함께 듣는 수업이어도 각자 수업 길이만큼 온전히 차감되므로,
+ * 학생마다 따로 센다.
+ */
 function shortageWarning(
-  studentId: string,
+  studentIds: string[],
   addedMin: number,
   students: Student[],
   lessons: Lesson[],
   today: string,
 ): string | null {
-  const student = students.find((s) => s.id === studentId);
-  if (!student) return null;
-  const left = balanceOf(student, lessons, today).remaining_min;
-  if (addedMin <= left) return null;
+  const short: string[] = [];
+  for (const id of studentIds) {
+    const student = students.find((s) => s.id === id);
+    if (!student) continue;
+    const left = balanceOf(student, lessons, today).remaining_min;
+    if (addedMin > left) {
+      short.push(student.name + " (잔여 " + toDurationLabel(Math.max(left, 0)) + ")");
+    }
+  }
+  if (!short.length) return null;
   return (
-    student.name + " 학생의 잔여 시간이 모자랍니다 — 잔여 " +
-    toDurationLabel(Math.max(left, 0)) + ", 이 수업 " + toDurationLabel(addedMin) + "."
+    short.join(", ") + " 학생의 잔여 시간이 모자랍니다 — 이 수업 " +
+    toDurationLabel(addedMin) + "."
   );
 }
 
@@ -204,8 +215,8 @@ async function saveLesson(
         conflict: {
           type: "teacher",
           message:
-            conflicts.teacher.teacher + " 선생님은 그 시간에 " + conflicts.teacher.student_name +
-            " 학생 수업이 있습니다. 그래도 등록할까요?",
+            conflicts.teacher.teacher + " 선생님은 그 시간에 " +
+            conflicts.teacher.student_names.join(", ") + " 학생 수업이 있습니다. 그래도 등록할까요?",
           existing: conflicts.teacher,
         },
       },
@@ -220,7 +231,7 @@ async function saveLesson(
   // 경고는 방금 옮겨온/수정 중인 수업을 뺀 나머지 기준으로 센다
   const others = lessons.filter((l) => l.id !== existingId && l.id !== moved?.id);
   const warning = shortageWarning(
-    parsed.student_id,
+    parsed.student_ids,
     parsed.end_min - parsed.start_min,
     students,
     others,
@@ -244,14 +255,17 @@ async function saveBlock(
   body: Record<string, unknown>,
   existingId: string | null,
 ): Promise<Response> {
-  const parsed = parseBlock(body);
+  const { students, lessons } = await loadAll(env);
+
+  const parsed = parseBlock(body, students);
   if (typeof parsed === "string") return bad(parsed);
 
   if (body.force !== true) {
-    const { lessons } = await loadAll(env);
     const hit = lessons.filter(
       (l) =>
         (parsed.teacher === null || l.teacher === parsed.teacher) &&
+        (!parsed.student_ids.length ||
+          l.student_ids.some((id) => parsed.student_ids.includes(id))) &&
         l.date === parsed.date &&
         l.start_min < parsed.end_min &&
         parsed.start_min < l.end_min,
@@ -263,7 +277,7 @@ async function saveBlock(
             type: "lessons-under",
             message:
               "그 시간에 이미 수업이 " + hit.length + "건 있습니다 (" +
-              hit.map((l) => l.student_name).join(", ") + "). 그래도 수업불가로 둘까요?",
+              hit.flatMap((l) => l.student_names).join(", ") + "). 그래도 수업불가로 둘까요?",
             count: hit.length,
           },
         },
@@ -299,7 +313,7 @@ async function saveStudent(
 /** 학생을 지울 때, 그 학생의 수업이 남아 있으면 먼저 알려 준다. */
 async function removeStudent(env: Env, id: string, force: boolean): Promise<Response> {
   const { lessons } = await loadAll(env);
-  const mine = lessons.filter((l) => l.student_id === id);
+  const mine = lessons.filter((l) => l.student_ids.includes(id));
   if (mine.length && !force) {
     return json(
       {

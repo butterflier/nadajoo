@@ -42,6 +42,7 @@ const L = {
   studentName: "학생명", // 관계가 끊겨도 시간표가 빈칸이 되지 않게 남기는 사본
   kind: "수업종류",
   content: "수업내용",
+  online: "온라인",
   date: "날짜",
   start: "시작",
   end: "종료",
@@ -52,6 +53,8 @@ const L = {
 const B = {
   title: "사유",
   teacher: "선생님",
+  student: "학생",
+  studentName: "학생명",
   date: "날짜",
   start: "시작",
   end: "종료",
@@ -165,9 +168,12 @@ const readNumber = (prop: any): number | null =>
 
 const readSelect = (prop: any): string | null => prop?.select?.name ?? null;
 
-const readRelationId = (prop: any): string | null => {
+const readCheckbox = (prop: any): boolean => prop?.checkbox === true;
+
+const readRelationIds = (prop: any): string[] => {
   const rel = prop?.relation;
-  return Array.isArray(rel) && rel.length ? String(rel[0]?.id ?? "") || null : null;
+  if (!Array.isArray(rel)) return [];
+  return rel.map((r: any) => String(r?.id ?? "")).filter(Boolean);
 };
 
 // ── 학생 ────────────────────────────────────────
@@ -252,8 +258,8 @@ function toLesson(page: any, studentsById: Map<string, Student>): Lesson | null 
   const kind = readSelect(props[L.kind]);
   if (!isKind(kind)) return null;
 
-  const studentId = readRelationId(props[L.student]);
-  if (!studentId) return null;
+  const studentIds = readRelationIds(props[L.student]);
+  if (!studentIds.length) return null;
 
   const startMin = parseTimeLabel(readText(props[L.start]) ?? "");
   const endMin = parseTimeLabel(readText(props[L.end]) ?? "");
@@ -263,19 +269,24 @@ function toLesson(page: any, studentsById: Map<string, Student>): Lesson | null 
   const date = rawDate ? String(rawDate).slice(0, 10) : null;
   if (!date || !parseDate(date)) return null;
 
-  const name = studentsById.get(studentId)?.name ?? readText(props[L.studentName]);
-  if (!name) return null;
+  // 이름은 관계가 가리키는 학생에서 가져오고, 그게 안 되면 사본을 나눠 쓴다
+  const copied = (readText(props[L.studentName]) ?? "").split(",").map((n) => n.trim());
+  const names = studentIds.map(
+    (id, i) => studentsById.get(id)?.name ?? copied[i] ?? "",
+  );
+  if (names.some((n) => !n)) return null;
 
   return {
     id: page.id,
     teacher,
-    student_id: studentId,
-    student_name: name,
+    student_ids: studentIds,
+    student_names: names,
     kind,
     date,
     start_min: startMin,
     end_min: endMin,
     content: readText(props[L.content]),
+    online: readCheckbox(props[L.online]),
     memo: readText(props[L.memo]),
   };
 }
@@ -284,13 +295,21 @@ function lessonProperties(lesson: LessonInput) {
   return {
     // 제목은 Notion에서 목록을 알아보기 쉬우라고 만들어 넣는다 — 앱은 읽지 않는다
     [L.title]: {
-      title: [{ text: { content: lesson.student_name + " · " + lesson.teacher + " " + lesson.kind } }],
+      title: [
+        {
+          text: {
+            content:
+              lesson.student_names.join(", ") + " · " + lesson.teacher + " " + lesson.kind,
+          },
+        },
+      ],
     },
     [L.teacher]: { select: { name: lesson.teacher } },
-    [L.student]: { relation: [{ id: lesson.student_id }] },
-    [L.studentName]: writeText(lesson.student_name),
+    [L.student]: { relation: lesson.student_ids.map((id) => ({ id })) },
+    [L.studentName]: writeText(lesson.student_names.join(", ")),
     [L.kind]: { select: { name: lesson.kind } },
     [L.content]: writeText(lesson.content),
+    [L.online]: { checkbox: lesson.online },
     [L.date]: { date: { start: lesson.date } },
     [L.start]: writeText(toTimeLabel(lesson.start_min)),
     [L.end]: writeText(toTimeLabel(lesson.end_min)),
@@ -356,13 +375,19 @@ function toBlock(page: any): Block | null {
   const date = rawDate ? String(rawDate).slice(0, 10) : null;
   if (!date || !parseDate(date)) return null;
 
-  // 비어 있거나 모르는 이름이면 선생님 전체로 본다
+  // 비어 있거나 모르는 이름이면 선생님을 가리지 않는 것으로 본다
   const teacherName = readSelect(props[B.teacher]);
   const teacher = isTeacher(teacherName) ? teacherName : null;
+
+  const studentIds = readRelationIds(props[B.student]);
+  const copied = (readText(props[B.studentName]) ?? "").split(",").map((n) => n.trim());
+  const studentNames = studentIds.map((id, i) => copied[i] || "이름 없음");
 
   return {
     id: page.id,
     teacher,
+    student_ids: studentIds,
+    student_names: studentNames,
     title,
     date,
     start_min: startMin,
@@ -375,6 +400,8 @@ function blockProperties(block: BlockInput) {
   return {
     [B.title]: { title: [{ text: { content: block.title } }] },
     [B.teacher]: block.teacher ? { select: { name: block.teacher } } : { select: null },
+    [B.student]: { relation: block.student_ids.map((id) => ({ id })) },
+    [B.studentName]: writeText(block.student_names.join(", ") || null),
     [B.date]: { date: { start: block.date } },
     [B.start]: writeText(toTimeLabel(block.start_min)),
     [B.end]: writeText(toTimeLabel(block.end_min)),

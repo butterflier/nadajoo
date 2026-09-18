@@ -341,6 +341,33 @@
   .msg.ok { color: var(--ink-soft); }
 
   .hint { font-size: 12px; color: var(--ink-soft); margin-top: 14px; line-height: 1.5; }
+  .soft { font-weight: 400; color: var(--ink-soft); }
+
+  /* 여러 명을 고르는 목록 — 학생이 늘어도 창이 길어지지 않게 스크롤한다 */
+  .picklist {
+    border: var(--line-w) solid var(--line);
+    border-radius: var(--radius);
+    margin-top: 6px;
+    max-height: 148px;
+    overflow: auto;
+  }
+  .picklist .check { border-bottom: var(--line-w) solid var(--line); }
+  .picklist .check:last-child { border-bottom: none; }
+  .picklist .none { padding: 10px; font-size: 12.5px; color: var(--ink-soft); }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-size: 13.5px;
+    cursor: pointer;
+  }
+  .check input { margin: 0; accent-color: var(--accent); }
+  .check .left { color: var(--ink-soft); font-size: 12px; margin-left: auto; }
+
+  /* 온라인 표시 — 학생 이름 왼쪽에 붙는 작은 무선 기호 */
+  .wifi { flex: none; vertical-align: -1px; margin-right: 3px; }
 
   /* 학생 창 안에 붙는 그 학생의 수업 목록 */
   .lesson-list { margin-top: 4px; border-top: var(--line-w) solid var(--line); }
@@ -395,6 +422,7 @@
     <div class="picker" id="tabs">
       <button class="btn is-active" type="button" data-view="teacher">선생님별</button>
       <button class="btn" type="button" data-view="date">날짜별</button>
+      <button class="btn" type="button" data-view="student">학생별</button>
       <button class="btn" type="button" data-view="students">학생 관리</button>
     </div>
     <span class="spacer"></span>
@@ -413,6 +441,20 @@
       <button class="btn" type="button" id="wk-today">이번 주</button>
       <button class="btn" type="button" id="wk-next">&rsaquo;</button>
       <span class="nav-label" id="wk-label"></span>
+    </div>
+  </div>
+
+  <div class="toolbar" id="bar-student" hidden>
+    <div class="field" style="margin: 0; min-width: 200px;">
+      <select id="pick-student"></select>
+    </div>
+    <span class="meta" id="student-balance"></span>
+    <span class="spacer"></span>
+    <div class="nav">
+      <button class="btn" type="button" id="sw-prev">&lsaquo;</button>
+      <button class="btn" type="button" id="sw-today">이번 주</button>
+      <button class="btn" type="button" id="sw-next">&rsaquo;</button>
+      <span class="nav-label" id="sw-label"></span>
     </div>
   </div>
 
@@ -440,9 +482,18 @@
         <select id="f-teacher"></select>
       </div>
       <div class="field">
-        <label for="f-student">학생</label>
-        <select id="f-student"></select>
+        <label for="f-online-wrap">온라인 수업</label>
+        <label class="check" id="f-online-wrap">
+          <input type="checkbox" id="f-online" />
+          <span>온라인으로 진행</span>
+        </label>
       </div>
+    </div>
+
+    <div class="field">
+      <label for="f-student-filter">학생 <span class="soft" id="f-student-count"></span></label>
+      <input type="text" id="f-student-filter" autocomplete="off" placeholder="이름으로 찾기" />
+      <div class="picklist" id="f-students"></div>
     </div>
 
     <div class="field">
@@ -525,6 +576,12 @@
         <label for="b-end">종료</label>
         <input type="time" id="b-end" step="300" />
       </div>
+    </div>
+
+    <div class="field">
+      <label for="b-student-filter">학생 <span class="soft">— 학생 쪽 수업불가면 고르세요 (비우면 학생을 가리지 않습니다)</span></label>
+      <input type="text" id="b-student-filter" autocomplete="off" placeholder="이름으로 찾기" />
+      <div class="picklist" id="b-students"></div>
     </div>
 
     <div class="field" id="b-repeat-field">
@@ -650,8 +707,18 @@
    *  - 날짜별:   칸이 선생님이라 어느 학생인지가 궁금하다
    */
   function blockColorOf(lesson, view) {
-    return view === "date" ? studentColorOf(lesson.student_id) : colorOf(lesson.kind);
+    return view === "date" ? studentColorOf(lesson.student_ids[0] || "") : colorOf(lesson.kind);
   }
+
+  /* 온라인 표시. 이미지 대신 선으로 그려서 글자색(currentColor)을 따라가게 한다. */
+  var WIFI_SVG =
+    '<svg class="wifi" width="13" height="10" viewBox="0 0 14 10" aria-hidden="true">' +
+    '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">' +
+    '<path d="M1.92 4.64 A6.2 6.2 0 0 1 12.08 4.64" />' +
+    '<path d="M4.22 6.25 A3.4 3.4 0 0 1 9.78 6.25" />' +
+    "</g>" +
+    '<circle cx="7" cy="8.2" r="1.4" fill="currentColor" />' +
+    "</svg>";
 
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
@@ -696,6 +763,9 @@
     password: "",
     view: "teacher",
     teacher: null,
+    student: null,        // 학생별 뷰에서 보고 있는 학생 id
+    pickedStudents: [],   // 수업 등록 창에서 고른 학생들
+    pickedBlockStudents: [],
     weekStart: "",
     day: "",
     data: null,
@@ -769,7 +839,7 @@
   }
 
   var lessonsOf = function (studentId) {
-    return (state.data.lessons || []).filter(function (l) { return l.student_id === studentId; });
+    return (state.data.lessons || []).filter(function (l) { return l.student_ids.indexOf(studentId) >= 0; });
   };
   var studentById = function (id) {
     return (state.data.students || []).find(function (s) { return s.id === id; }) || null;
@@ -805,6 +875,7 @@
     var calendar = state.view !== "students";
     $("bar-teacher").hidden = state.view !== "teacher";
     $("bar-date").hidden = state.view !== "date";
+    $("bar-student").hidden = state.view !== "student";
     $("btn-png").hidden = !calendar;
 
     var today = state.data.today;
@@ -817,6 +888,23 @@
       });
       $("hint").textContent = "빈 칸을 누르면 그 시각으로 등록 창이 열립니다 (30분 단위, 기본 " +
         DEFAULT_DURATION_MIN / 60 + "시간). 블록을 누르면 수정 창입니다.";
+    } else if (state.view === "student") {
+      renderStudentPicker();
+      $("sw-label").textContent = state.weekStart + " ~ " + addDays(state.weekStart, 6);
+      var me = studentById(state.student);
+      if (!me) {
+        $("sheet").innerHTML = '<div class="empty">학생을 먼저 등록해 주세요.</div>';
+        $("student-balance").textContent = "";
+      } else {
+        var b = me.balance;
+        $("student-balance").textContent =
+          "총 " + toDurationLabel(b.total_min) + " · 사용 " + toDurationLabel(b.used_min) +
+          " · 잔여 " + (b.remaining_min < 0 ? "-" + toDurationLabel(-b.remaining_min) : toDurationLabel(b.remaining_min));
+        renderGrid(studentColumns(), function (l) {
+          return l.student_ids.indexOf(state.student) >= 0 ? l.date : null;
+        });
+      }
+      $("hint").textContent = "그 학생의 한 주입니다. 선생님이 달라도 다 보입니다. 빈 칸을 누르면 그 학생으로 등록 창이 열립니다.";
     } else if (state.view === "date") {
       var d = parseDate(state.day);
       $("dy-label").textContent = state.day + " (" + DOW_LABELS[dowOf(d)] + ")";
@@ -848,6 +936,36 @@
     return cols;
   }
 
+  /** 학생별 주간뷰 — 월~일 7칸. 선생님을 가리지 않는다. */
+  function studentColumns() {
+    var cols = [];
+    for (var i = 0; i < 7; i++) {
+      var label = addDays(state.weekStart, i);
+      cols.push({
+        key: label,
+        title: DOW_LABELS[i],
+        sub: mmdd(label),
+        weekend: i >= 5,
+        today: label === state.data.today,
+        date: label,
+        teacher: null,          // 빈 칸을 누르면 선생님은 등록 창에서 고른다
+        student: state.student
+      });
+    }
+    return cols;
+  }
+
+  function renderStudentPicker() {
+    var students = state.data.students || [];
+    if (!state.student || !studentById(state.student)) {
+      state.student = students.length ? students[0].id : null;
+    }
+    $("pick-student").innerHTML = students.map(function (s) {
+      return '<option value="' + esc(s.id) + '"' + (s.id === state.student ? " selected" : "") +
+        ">" + esc(s.name) + "</option>";
+    }).join("");
+  }
+
   /** 날짜별 선생님뷰 — 선생님 한 분이 한 칸. */
   function dateColumns() {
     return state.data.teachers.map(function (t) {
@@ -864,6 +982,18 @@
         teacher: t
       };
     });
+  }
+
+  /**
+   * 이 수업불가가 그 칸에 걸리는가.
+   * 선생님 칸이면 선생님을, 학생 칸이면 학생을 본다. 둘 다 안 가리는 것(연휴)은 어디에나 걸린다.
+   */
+  function blockHits(b, teacher, student) {
+    var global = b.teacher === null && !b.student_ids.length;
+    if (global) return true;
+    if (teacher && b.teacher === teacher) return true;
+    if (student && b.student_ids.indexOf(student) >= 0) return true;
+    return false;
   }
 
   var HOURS = (DAY_END_MIN - DAY_START_MIN) / 60;
@@ -942,7 +1072,7 @@
       // 수업불가를 먼저, 칸 전체 폭에 깐다 — 수업과 자리를 나눠 갖지 않는다
       blocks.forEach(function (b) {
         if (b.date !== c.date) return;
-        if (b.teacher !== null && b.teacher !== c.teacher) return;
+        if (!blockHits(b, c.teacher, c.student)) return;
         var mins = b.end_min - b.start_min;
         var size = mins < 40 ? " tiny" : mins < 70 ? " short" : "";
         html += '<button class="lesson blocked' + size + '" type="button" data-block="' + esc(b.id) + '"' +
@@ -968,12 +1098,13 @@
           ' style="top:' + topPct(l.start_min) + "%; height:" + height + "%;" +
           " left:" + p.lane * width + "%; width: calc(" + width + "% - 3px);" +
           " background:" + color.bg + "; border-color:" + color.line + "; color:" + color.ink + ';"' +
-          ' title="' + esc(l.student_name + " · " + l.teacher + " " + l.kind +
+          ' title="' + esc(l.student_names.join(", ") + " · " + l.teacher + " " + l.kind +
+            (l.online ? " · 온라인" : "") +
             (l.content ? " · " + l.content : "") +
             (l.memo ? " · " + l.memo : "")) + '">' +
           '<span class="when">[' + esc(l.kind) + "] " +
             toTimeLabel(l.start_min) + "–" + toTimeLabel(l.end_min) + "</span>" +
-          '<span class="t">' + esc(l.student_name) + "</span>" +
+          '<span class="t">' + (l.online ? WIFI_SVG : "") + esc(l.student_names.join(", ")) + "</span>" +
           (l.content ? '<span class="who">' + esc(l.content) + "</span>" : "") +
           "</button>";
       });
@@ -983,7 +1114,7 @@
     html += "</div>";
     $("sheet").innerHTML = html;
     $("sheet").dataset.cols = JSON.stringify(cols.map(function (c) {
-      return { key: c.key, date: c.date, teacher: c.teacher };
+      return { key: c.key, date: c.date, teacher: c.teacher, student: c.student || null };
     }));
   }
 
@@ -1004,6 +1135,7 @@
     var col = e.target.closest(".col");
     if (!col) return;
     var meta = JSON.parse($("sheet").dataset.cols || "[]").find(function (c) { return c.key === col.dataset.col; });
+
     if (!meta) return;
 
     var rect = col.getBoundingClientRect();
@@ -1013,7 +1145,13 @@
     var end = Math.min(start + DEFAULT_DURATION_MIN, DAY_END_MIN);
     if (end - start < SLOT_MIN) start = end - DEFAULT_DURATION_MIN;
 
-    openLesson(null, { teacher: meta.teacher, date: meta.date, start_min: start, end_min: end });
+    openLesson(null, {
+      teacher: meta.teacher || state.teacher,
+      student_ids: meta.student ? [meta.student] : [],
+      date: meta.date,
+      start_min: start,
+      end_min: end
+    });
   });
 
   // ── 주/일 이동 ──────────────────────────────────
@@ -1023,6 +1161,10 @@
   $("dy-prev").addEventListener("click", function () { state.day = addDays(state.day, -1); render(); });
   $("dy-next").addEventListener("click", function () { state.day = addDays(state.day, 1); render(); });
   $("dy-today").addEventListener("click", function () { state.day = state.data.today; render(); });
+  $("sw-prev").addEventListener("click", function () { state.weekStart = addDays(state.weekStart, -7); render(); });
+  $("sw-next").addEventListener("click", function () { state.weekStart = addDays(state.weekStart, 7); render(); });
+  $("sw-today").addEventListener("click", function () { state.weekStart = weekStartOf(state.data.today); render(); });
+  $("pick-student").addEventListener("change", function () { state.student = this.value; render(); });
   $("btn-refresh").addEventListener("click", function () { load(); });
 
   // ── 학생 관리 ───────────────────────────────────
@@ -1075,19 +1217,60 @@
     renderKindChips();
   });
 
-  function fillSelects(selectedStudent) {
+  /**
+   * 학생을 여러 명 고르는 목록. 두 창(수업·수업불가)이 같이 쓴다.
+   * 고른 사람은 걸러도 사라지지 않게 언제나 맨 위에 남긴다.
+   */
+  function renderPicklist(boxId, filterId, picked) {
+    var q = ($(filterId).value || "").trim();
+    var students = state.data.students || [];
+    if (!students.length) {
+      $(boxId).innerHTML = '<div class="none">학생을 먼저 등록해 주세요.</div>';
+      return;
+    }
+    var shown = students.filter(function (s) {
+      return picked.indexOf(s.id) >= 0 || !q || s.name.indexOf(q) >= 0;
+    });
+    if (!shown.length) {
+      $(boxId).innerHTML = '<div class="none">찾는 학생이 없습니다.</div>';
+      return;
+    }
+    $(boxId).innerHTML = shown.map(function (s) {
+      var left = s.balance.remaining_min;
+      var tag = left < 0 ? "초과 " + toDurationLabel(-left) : "잔여 " + toDurationLabel(left);
+      return '<label class="check"><input type="checkbox" value="' + esc(s.id) + '"' +
+        (picked.indexOf(s.id) >= 0 ? " checked" : "") + " />" +
+        "<span>" + esc(s.name) + '</span><span class="left">' + tag + "</span></label>";
+    }).join("");
+  }
+
+  /** 체크 상태를 상태 배열에 반영한다. 고른 순서를 지킨다. */
+  function bindPicklist(boxId, filterId, key) {
+    $(boxId).addEventListener("change", function (e) {
+      var input = e.target;
+      if (!input || input.type !== "checkbox") return;
+      var picked = state[key];
+      var at = picked.indexOf(input.value);
+      if (input.checked && at < 0) picked.push(input.value);
+      if (!input.checked && at >= 0) picked.splice(at, 1);
+      if (key === "pickedStudents") updatePickedCount();
+    });
+    $(filterId).addEventListener("input", function () {
+      renderPicklist(boxId, filterId, state[key]);
+    });
+  }
+  bindPicklist("f-students", "f-student-filter", "pickedStudents");
+  bindPicklist("b-students", "b-student-filter", "pickedBlockStudents");
+
+  function updatePickedCount() {
+    var n = state.pickedStudents.length;
+    $("f-student-count").textContent = n > 1 ? "— " + n + "명이 함께 듣는 수업" : "";
+  }
+
+  function fillSelects() {
     $("f-teacher").innerHTML = state.data.teachers.map(function (t) {
       return '<option value="' + esc(t) + '">' + esc(t) + " 선생님</option>";
     }).join("");
-
-    var students = state.data.students || [];
-    $("f-student").innerHTML = (students.length ? "" : '<option value="">학생을 먼저 등록해 주세요</option>') +
-      students.map(function (s) {
-        var left = s.balance.remaining_min;
-        var tag = left < 0 ? "초과 " + toDurationLabel(-left) : "잔여 " + toDurationLabel(left);
-        return '<option value="' + esc(s.id) + '">' + esc(s.name) + " (" + tag + ")</option>";
-      }).join("");
-    if (selectedStudent) $("f-student").value = selectedStudent;
   }
 
   function openLesson(lesson, prefill) {
@@ -1096,7 +1279,12 @@
     state.kind = base.kind || state.data.kinds[0];
 
     $("lesson-title").textContent = lesson ? "수업 수정" : "수업 등록";
-    fillSelects(base.student_id);
+    fillSelects();
+    state.pickedStudents = (base.student_ids || []).slice();
+    $("f-student-filter").value = "";
+    renderPicklist("f-students", "f-student-filter", state.pickedStudents);
+    updatePickedCount();
+    $("f-online").checked = base.online === true;
     renderKindChips();
     $("f-teacher").value = base.teacher || state.teacher;
     $("f-date").value = base.date || state.data.today;
@@ -1109,7 +1297,7 @@
     $("btn-delete").hidden = !lesson;
     $("lesson-msg").textContent = "";
     $("scrim-lesson").hidden = false;
-    $("f-student").focus();
+    $("f-student-filter").focus();
   }
 
   var closeLesson = function () { $("scrim-lesson").hidden = true; state.editingLesson = null; };
@@ -1124,11 +1312,12 @@
     if (start < DAY_START_MIN || end > DAY_END_MIN) {
       return "수업은 " + toTimeLabel(DAY_START_MIN) + " 부터 24:00 사이여야 합니다.";
     }
-    if (!$("f-student").value) return "학생을 선택해 주세요.";
+    if (!state.pickedStudents.length) return "학생을 선택해 주세요.";
     if (!$("f-date").value) return "날짜를 입력해 주세요.";
     return {
       teacher: $("f-teacher").value,
-      student_id: $("f-student").value,
+      student_ids: state.pickedStudents.slice(),
+      online: $("f-online").checked,
       kind: state.kind,
       date: $("f-date").value,
       start_min: start,
@@ -1184,7 +1373,7 @@
   $("btn-delete").addEventListener("click", async function () {
     var lesson = state.editingLesson;
     if (!lesson) return;
-    if (!confirm(lesson.student_name + " 학생의 " + lesson.date + " " +
+    if (!confirm(lesson.student_names.join(", ") + " 학생의 " + lesson.date + " " +
       toTimeLabel(lesson.start_min) + " 수업을 삭제할까요?")) return;
     $("btn-delete").disabled = true;
     try {
@@ -1213,6 +1402,10 @@
       }).join("");
     $("b-teacher").value = base.teacher || (block ? ALL_TEACHERS : state.teacher);
 
+    state.pickedBlockStudents = (base.student_ids || []).slice();
+    $("b-student-filter").value = "";
+    renderPicklist("b-students", "b-student-filter", state.pickedBlockStudents);
+
     $("b-title").value = base.title || "";
     $("b-date").value = base.date || state.data.today;
     $("b-start").value = toTimeLabel(base.start_min != null ? base.start_min : 14 * 60);
@@ -1234,7 +1427,8 @@
     var weekEnd = addDays(state.weekStart, 6);
     var inWeek = state.data.today >= state.weekStart && state.data.today <= weekEnd;
     openBlock(null, {
-      teacher: state.view === "date" ? null : state.teacher,
+      teacher: state.view === "student" ? null : state.view === "date" ? null : state.teacher,
+      student_ids: state.view === "student" && state.student ? [state.student] : [],
       date: state.view === "date" ? state.day : (inWeek ? state.data.today : state.weekStart)
     });
   });
@@ -1250,8 +1444,13 @@
     if (!$("b-title").value.trim()) return "사유를 입력해 주세요. (예: 정규수업, 휴가)";
     if (!$("b-date").value) return "날짜를 입력해 주세요.";
     var teacher = $("b-teacher").value;
+    if (teacher === ALL_TEACHERS && !state.pickedBlockStudents.length &&
+        !confirm("선생님도 학생도 안 고르셨습니다. 모두에게 걸리는 수업불가로 둘까요? (연휴처럼)")) {
+      return "선생님이나 학생을 골라 주세요.";
+    }
     return {
       teacher: teacher === ALL_TEACHERS ? "" : teacher,
+      student_ids: state.pickedBlockStudents.slice(),
       title: $("b-title").value.trim(),
       date: $("b-date").value,
       start_min: start,
@@ -1330,8 +1529,9 @@
             var past = l.date <= state.data.today;
             return '<div class="item' + (past ? " past" : "") + '">' +
               '<span class="d">' + esc(l.date) + " " + toTimeLabel(l.start_min) + "–" + toTimeLabel(l.end_min) + "</span>" +
-              "<span>" + esc(l.teacher) + " · " + esc(l.kind) +
-                (l.content ? " · " + esc(l.content) : "") + "</span>" +
+              "<span>" + (l.online ? WIFI_SVG : "") + esc(l.teacher) + " · " + esc(l.kind) +
+                (l.content ? " · " + esc(l.content) : "") +
+                (l.student_ids.length > 1 ? " · " + esc(l.student_names.join(", ")) : "") + "</span>" +
               '<span class="d">' + (past ? "차감됨" : "예정") + "</span>" +
               "</div>";
           }).join("")
@@ -1364,6 +1564,7 @@
     var inWeek = state.data.today >= state.weekStart && state.data.today <= weekEnd;
     openLesson(null, {
       teacher: state.view === "date" ? state.data.teachers[0] : state.teacher,
+      student_ids: state.view === "student" && state.student ? [state.student] : [],
       date: state.view === "date" ? state.day : (inWeek ? state.data.today : state.weekStart)
     });
   });
@@ -1419,7 +1620,7 @@
   // ── 시작 ────────────────────────────────────────
   window.__nadajoo = { state: state, render: render, load: load, helpers: {
     toTimeLabel: toTimeLabel, colorOf: colorOf, layout: layout, topPct: topPct,
-    studentColorOf: studentColorOf, blockColorOf: blockColorOf,
+    studentColorOf: studentColorOf, blockColorOf: blockColorOf, blockHits: blockHits,
     DAY_START_MIN: DAY_START_MIN, DAY_END_MIN: DAY_END_MIN, HOURS: HOURS,
     DOW_LABELS: DOW_LABELS, addDays: addDays, dowOf: dowOf, parseDate: parseDate,
     mmdd: mmdd, esc: esc, teacherColumns: teacherColumns, dateColumns: dateColumns
@@ -1482,9 +1683,9 @@
   }
 
   /** 그 칸(선생님·날짜)에 걸리는 수업불가. 선생님을 비운 것은 모두에게 걸린다. */
-  function blocksFor(teacher, date) {
+  function blocksFor(teacher, date, student) {
     return (state.data.blocks || []).filter(function (b) {
-      return b.date === date && (b.teacher === null || b.teacher === teacher);
+      return b.date === date && H.blockHits(b, teacher, student || null);
     });
   }
 
@@ -1507,13 +1708,20 @@
         }),
         // 칸이 선생님이므로 색은 학생을 가리킨다 — 그날 나오는 학생만 싣는다
         legend: dedupe(
-          lessons.filter(function (l) { return l.date === state.day; }),
-          function (l) { return l.student_id; }
-        ).map(function (l) {
-          return { label: l.student_name, color: H.studentColorOf(l.student_id) };
+          lessons
+            .filter(function (l) { return l.date === state.day; })
+            // 색은 첫 학생을 따르므로 범례도 첫 학생만 싣는다
+            .map(function (l) { return { id: l.student_ids[0], name: l.student_names[0] }; })
+            .filter(function (x) { return x.id; }),
+          function (x) { return x.id; }
+        ).map(function (x) {
+          return { label: x.name, color: H.studentColorOf(x.id) };
         }).sort(function (a, b) { return a.label.localeCompare(b.label, "ko"); })
       };
     }
+    var byStudent = state.view === "student";
+    var me = byStudent ? (state.data.students || []).find(function (s) { return s.id === state.student; }) : null;
+
     var cols = [];
     for (var i = 0; i < 7; i++) {
       var label = H.addDays(state.weekStart, i);
@@ -1521,14 +1729,23 @@
         title: H.DOW_LABELS[i],
         sub: H.mmdd(label),
         weekend: i >= 5,
-        items: lessons.filter(function (l) { return l.teacher === state.teacher && l.date === label; }),
-        blocks: blocksFor(state.teacher, label),
-        second: function (l) { return l.content || ""; }
+        items: lessons.filter(function (l) {
+          return l.date === label &&
+            (byStudent ? l.student_ids.indexOf(state.student) >= 0 : l.teacher === state.teacher);
+        }),
+        blocks: byStudent ? blocksFor(null, label, state.student) : blocksFor(state.teacher, label),
+        // 학생별 시간표에서는 아래칸에 선생님을 적는 게 더 쓸모 있다
+        second: byStudent
+          ? function (l) { return l.teacher + "T" + (l.content ? " · " + l.content : ""); }
+          : function (l) { return l.content || ""; }
       });
     }
+
+    var who = byStudent ? (me ? me.name + " 학생" : "학생") : state.teacher + " 선생님";
+    var span = state.weekStart + " ~ " + H.addDays(state.weekStart, 6);
     return {
-      title: state.teacher + " 선생님 · " + state.weekStart + " ~ " + H.addDays(state.weekStart, 6),
-      file: "나다주_" + state.teacher + "선생님_" + state.weekStart + "~" + H.addDays(state.weekStart, 6) + ".png",
+      title: who + " · " + span,
+      file: "나다주_" + who.replace(/ /g, "") + "_" + span.replace(/ /g, "") + ".png",
       colW: 136,
       cols: cols,
       legend: state.data.kinds.map(function (kind) {
@@ -1586,6 +1803,29 @@
       used += width;
     });
     return rows;
+  }
+
+  /** 온라인 표시. 화면의 SVG와 같은 모양을 선으로 그린다 (세로 가운데가 cy). */
+  function drawWifi(ctx, x, cy, w) {
+    var s = w / 14;               // 14 x 10 기준으로 그린 것을 w 에 맞춘다
+    var cx = x + w / 2;
+    var base = cy + 3.2 * s;      // 점의 중심
+    var a1 = -145 * Math.PI / 180;
+    var a2 = -35 * Math.PI / 180;
+
+    ctx.save();
+    ctx.strokeStyle = ctx.fillStyle;
+    ctx.lineWidth = 1.6 * s;
+    ctx.lineCap = "round";
+    [6.2, 3.4].forEach(function (r) {
+      ctx.beginPath();
+      ctx.arc(cx, base, r * s, a1, a2);
+      ctx.stroke();
+    });
+    ctx.beginPath();
+    ctx.arc(cx, base, 1.4 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   function roundRect(ctx, x, y, w, h, r) {
@@ -1766,6 +2006,7 @@
       H.layout(c.items).forEach(function (p) {
         var l = p.item;
         var color = H.blockColorOf(l, state.view);
+        var names = l.student_names.join(", ");
         var laneW = (plan.colW - 4) / p.lanes;
         var x = gridX + i * plan.colW + 2 + p.lane * laneW;
         var y = bodyY + ((l.start_min - range.from) / span) * bodyH;
@@ -1793,7 +2034,7 @@
         if (bh >= 44) {
           lines = [
             { text: head, font: font(400, 10.5), alpha: 0.8, lh: 14 },
-            { text: l.student_name, font: font(700, 13), alpha: 1, lh: 17 }
+            { text: names, font: font(700, 13), alpha: 1, lh: 17, wifi: l.online }
           ];
           if (c.second(l)) {
             lines.push({ text: c.second(l), font: font(400, 10.5), alpha: 0.8, lh: 14 });
@@ -1801,10 +2042,10 @@
         } else if (bh >= 30) {
           lines = [
             { text: head, font: font(400, 10), alpha: 0.8, lh: 13 },
-            { text: l.student_name, font: font(700, 12), alpha: 1, lh: 15 }
+            { text: names, font: font(700, 12), alpha: 1, lh: 15, wifi: l.online }
           ];
         } else {
-          lines = [{ text: l.student_name, font: font(700, 11.5), alpha: 1, lh: 14 }];
+          lines = [{ text: names, font: font(700, 11.5), alpha: 1, lh: 14, wifi: l.online }];
         }
 
         // 가로세로 가운데. 화면 블록이 flex 로 가운데 두는 것과 같은 결과다.
@@ -1815,7 +2056,20 @@
         lines.forEach(function (ln) {
           ctx.font = ln.font;
           ctx.globalAlpha = ln.alpha;
-          ctx.fillText(clip(ctx, ln.text, inner), x + bw / 2, cursor + ln.lh / 2);
+          var mid = cursor + ln.lh / 2;
+          if (ln.wifi) {
+            // 표시 + 여백만큼 글자를 오른쪽으로 밀고, 둘을 묶어 가운데에 놓는다
+            var gap = 3;
+            var iconW = 11;
+            var textW = Math.min(ctx.measureText(ln.text).width, inner - iconW - gap);
+            var startX = x + bw / 2 - (iconW + gap + textW) / 2;
+            drawWifi(ctx, startX, mid, iconW);
+            ctx.textAlign = "left";
+            ctx.fillText(clip(ctx, ln.text, inner - iconW - gap), startX + iconW + gap, mid);
+            ctx.textAlign = "center";
+          } else {
+            ctx.fillText(clip(ctx, ln.text, inner), x + bw / 2, mid);
+          }
           cursor += ln.lh;
         });
         ctx.globalAlpha = 1;

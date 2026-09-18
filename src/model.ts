@@ -38,31 +38,45 @@ export interface Student {
 export interface Lesson {
   id: string;          // Notion 페이지 ID
   teacher: Teacher;
-  student_id: string;
-  student_name: string; // 표시용 사본 — 학생이 지워져도 시간표가 빈칸이 되지 않게 남긴다
+  /**
+   * 이 수업을 듣는 학생들. 보통 한 명이지만, 두 명이 같은 시간에 함께 듣는
+   * 수업도 있다 — 그때도 수업은 한 건이고, 잔여 시간은 각자 수업 길이만큼
+   * 온전히 차감된다 (나눠 갖지 않는다).
+   */
+  student_ids: string[];
+  student_names: string[]; // 표시용 사본 — 학생이 지워져도 시간표가 빈칸이 되지 않게 남긴다
   kind: Kind;
   date: string;        // YYYY-MM-DD (이 앱의 수업은 전부 하루짜리다)
   start_min: number;   // 자정 기준 분
   end_min: number;
   content: string | null; // 무슨 수업인지 한 줄 — 블록 아래칸에 그대로 나온다
+  online: boolean;        // 온라인 수업이면 블록의 학생 이름 왼쪽에 표시가 붙는다
   memo: string | null;
 }
 
 /**
  * 수업을 넣을 수 없는 시간 — 정규수업, 휴가, 연휴 같은 것.
  *
- * 학생이 없으니 잔여 시간과는 무관하다. 격자에 회색으로 깔려서
- * "여기엔 개인수업을 넣을 수 없다"는 것만 보여 준다.
+ * 선생님 쪽에도, 학생 쪽에도 걸 수 있다. 학생의 정규수업 시간에는 그 학생의
+ * 개인수업을 못 넣고, 선생님의 정규수업 시간에는 그 선생님 수업을 못 넣는다.
+ * 잔여 시간과는 무관하다 — 수업이 아니기 때문이다.
+ *
+ * 셋 다 비면 모두에게 걸린다 (연휴처럼).
  */
 export interface Block {
   id: string;
-  teacher: Teacher | null; // null이면 선생님 전체 (연휴처럼)
-  title: string;           // 사유 — 정규수업 / 추석연휴 / 휴가 …
-  date: string;            // YYYY-MM-DD
+  teacher: Teacher | null;   // null이면 선생님을 가리지 않는다
+  student_ids: string[];     // 비어 있으면 학생을 가리지 않는다
+  student_names: string[];
+  title: string;             // 사유 — 정규수업 / 추석연휴 / 휴가 …
+  date: string;              // YYYY-MM-DD
   start_min: number;
   end_min: number;
   memo: string | null;
 }
+
+/** 이 수업불가가 누구에게도 안 걸리는 게 아니라, 모두에게 걸리는 것인지. */
+export const isGlobalBlock = (b: Block) => b.teacher === null && !b.student_ids.length;
 
 /** 저장 직전의 값 — 아직 ID가 없다. */
 export type StudentInput = Omit<Student, "id">;
@@ -157,7 +171,7 @@ export function balanceOf(student: Student, lessons: Lesson[], today: string): B
   let used = 0;
   let planned = 0;
   for (const l of lessons) {
-    if (l.student_id !== student.id) continue;
+    if (!l.student_ids.includes(student.id)) continue;
     const dur = l.end_min - l.start_min;
     if (l.date <= today) used += dur;
     else planned += dur;
@@ -205,17 +219,19 @@ export function findConflicts(
   for (const l of lessons) {
     if (ignoreId && l.id === ignoreId) continue;
     if (!overlaps(candidate, l)) continue;
-    if (!student && l.student_id === candidate.student_id) student = l;
+    if (!student && l.student_ids.some((id) => candidate.student_ids.includes(id))) student = l;
     if (!teacher && l.teacher === candidate.teacher) teacher = l;
   }
 
-  // 선생님을 비운 수업불가(연휴 등)는 모두에게 걸린다
   let blocked: Block | null = null;
   for (const b of blocks) {
-    if (b.teacher !== null && b.teacher !== candidate.teacher) continue;
     if (!overlaps(candidate, b)) continue;
-    blocked = b;
-    break;
+    const hitsTeacher = b.teacher !== null && b.teacher === candidate.teacher;
+    const hitsStudent = b.student_ids.some((id) => candidate.student_ids.includes(id));
+    if (hitsTeacher || hitsStudent || isGlobalBlock(b)) {
+      blocked = b;
+      break;
+    }
   }
 
   return { student, teacher, blocked };
@@ -247,9 +263,18 @@ export function parseLesson(
   const kind = body.kind;
   if (!isKind(kind)) return "수업종류를 선택해 주세요.";
 
-  const studentId = text(body.student_id);
-  const student = students.find((s) => s.id === studentId);
-  if (!student) return "학생을 선택해 주세요.";
+  // 예전 폼은 학생 하나만 보냈다 — 둘 다 받아 준다
+  const rawIds = Array.isArray(body.student_ids)
+    ? body.student_ids
+    : body.student_id !== undefined
+      ? [body.student_id]
+      : [];
+  const picked = rawIds
+    .map((raw) => students.find((s) => s.id === text(raw)))
+    .filter((s): s is Student => Boolean(s));
+  // 같은 학생을 두 번 고른 것은 한 번으로 친다
+  const chosen = picked.filter((s, i) => picked.findIndex((o) => o.id === s.id) === i);
+  if (!chosen.length) return "학생을 선택해 주세요.";
 
   const date = text(body.date);
   if (!date || !parseDate(date)) return "날짜를 확인해 주세요.";
@@ -265,26 +290,35 @@ export function parseLesson(
 
   return {
     teacher,
-    student_id: student.id,
-    student_name: student.name,
+    student_ids: chosen.map((s) => s.id),
+    student_names: chosen.map((s) => s.name),
     kind,
     date,
     start_min: start,
     end_min: end,
     content: text(body.content),
+    online: body.online === true,
     memo: text(body.memo),
   };
 }
 
 /** 폼에서 온 값을 수업불가로. */
-export function parseBlock(body: Record<string, unknown>): BlockInput | string {
+export function parseBlock(
+  body: Record<string, unknown>,
+  students: Student[] = [],
+): BlockInput | string {
   const title = text(body.title);
   if (!title) return "사유를 입력해 주세요. (예: 정규수업, 휴가)";
 
-  // 빈 값이면 선생님 전체에 걸린다
   const rawTeacher = text(body.teacher);
   if (rawTeacher !== null && !isTeacher(rawTeacher)) return "선생님을 확인해 주세요.";
   const teacher = rawTeacher as Teacher | null;
+
+  const rawIds = Array.isArray(body.student_ids) ? body.student_ids : [];
+  const picked = rawIds
+    .map((raw) => students.find((s) => s.id === text(raw)))
+    .filter((s): s is Student => Boolean(s));
+  const chosen = picked.filter((s, i) => picked.findIndex((o) => o.id === s.id) === i);
 
   const date = text(body.date);
   if (!date || !parseDate(date)) return "날짜를 확인해 주세요.";
@@ -298,7 +332,16 @@ export function parseBlock(body: Record<string, unknown>): BlockInput | string {
   }
   if (start % 5 || end % 5) return "시간은 5분 단위로 입력해 주세요.";
 
-  return { teacher, title, date, start_min: start, end_min: end, memo: text(body.memo) };
+  return {
+    teacher,
+    student_ids: chosen.map((s) => s.id),
+    student_names: chosen.map((s) => s.name),
+    title,
+    date,
+    start_min: start,
+    end_min: end,
+    memo: text(body.memo),
+  };
 }
 
 /** 폼에서 온 값을 학생으로. */
