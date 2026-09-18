@@ -39,6 +39,7 @@ const L = {
   student: "학생",      // 학생 DB를 가리키는 관계형 속성
   studentName: "학생명", // 관계가 끊겨도 시간표가 빈칸이 되지 않게 남기는 사본
   kind: "수업종류",
+  content: "수업내용",
   date: "날짜",
   start: "시작",
   end: "종료",
@@ -242,6 +243,7 @@ function toLesson(page: any, studentsById: Map<string, Student>): Lesson | null 
     date,
     start_min: startMin,
     end_min: endMin,
+    content: readText(props[L.content]),
     memo: readText(props[L.memo]),
   };
 }
@@ -256,6 +258,7 @@ function lessonProperties(lesson: LessonInput) {
     [L.student]: { relation: [{ id: lesson.student_id }] },
     [L.studentName]: writeText(lesson.student_name),
     [L.kind]: { select: { name: lesson.kind } },
+    [L.content]: writeText(lesson.content),
     [L.date]: { date: { start: lesson.date } },
     [L.start]: writeText(toTimeLabel(lesson.start_min)),
     [L.end]: writeText(toTimeLabel(lesson.end_min)),

@@ -431,6 +431,11 @@
       <div class="chips" id="f-kinds"></div>
     </div>
 
+    <div class="field">
+      <label for="f-content">수업내용</label>
+      <input type="text" id="f-content" autocomplete="off" placeholder="예: 게이오대학 본고사" />
+    </div>
+
     <div class="row">
       <div class="field">
         <label for="f-date">날짜</label>
@@ -861,10 +866,12 @@
           " left:" + p.lane * width + "%; width: calc(" + width + "% - 3px);" +
           " background:" + color.bg + "; border-color:" + color.line + "; color:" + color.ink + ';"' +
           ' title="' + esc(l.student_name + " · " + l.teacher + " " + l.kind +
+            (l.content ? " · " + l.content : "") +
             (l.memo ? " · " + l.memo : "")) + '">' +
-          '<span class="when">' + toTimeLabel(l.start_min) + "–" + toTimeLabel(l.end_min) + "</span>" +
+          '<span class="when">[' + esc(l.kind) + "] " +
+            toTimeLabel(l.start_min) + "–" + toTimeLabel(l.end_min) + "</span>" +
           '<span class="t">' + esc(l.student_name) + "</span>" +
-          '<span class="who">' + esc(l.kind) + "</span>" +
+          (l.content ? '<span class="who">' + esc(l.content) + "</span>" : "") +
           "</button>";
       });
       html += "</div>";
@@ -986,6 +993,7 @@
     $("f-date").value = base.date || state.data.today;
     $("f-start").value = toTimeLabel(base.start_min != null ? base.start_min : 16 * 60);
     $("f-end").value = toTimeLabel(base.end_min != null ? base.end_min : 16 * 60 + DEFAULT_DURATION_MIN);
+    $("f-content").value = base.content || "";
     $("f-memo").value = base.memo || "";
     $("f-repeat").value = "1";
     $("f-repeat").closest(".field").hidden = !!lesson;   // 수정할 때는 반복이 의미가 없다
@@ -1016,6 +1024,7 @@
       date: $("f-date").value,
       start_min: start,
       end_min: end,
+      content: $("f-content").value.trim(),
       memo: $("f-memo").value.trim()
     };
   }
@@ -1106,7 +1115,8 @@
             var past = l.date <= state.data.today;
             return '<div class="item' + (past ? " past" : "") + '">' +
               '<span class="d">' + esc(l.date) + " " + toTimeLabel(l.start_min) + "–" + toTimeLabel(l.end_min) + "</span>" +
-              "<span>" + esc(l.teacher) + " · " + esc(l.kind) + "</span>" +
+              "<span>" + esc(l.teacher) + " · " + esc(l.kind) +
+                (l.content ? " · " + esc(l.content) : "") + "</span>" +
               '<span class="d">' + (past ? "차감됨" : "예정") + "</span>" +
               "</div>";
           }).join("")
@@ -1264,7 +1274,7 @@
             sub: "",
             weekend: false,
             items: lessons.filter(function (l) { return l.date === state.day && l.teacher === t; }),
-            second: function (l) { return l.kind; }
+            second: function (l) { return l.content || ""; }
           };
         }),
         // 칸이 선생님이므로 색은 학생을 가리킨다 — 그날 나오는 학생만 싣는다
@@ -1284,7 +1294,7 @@
         sub: H.mmdd(label),
         weekend: i >= 5,
         items: lessons.filter(function (l) { return l.teacher === state.teacher && l.date === label; }),
-        second: function (l) { return l.kind; }
+        second: function (l) { return l.content || ""; }
       });
     }
     return {
@@ -1508,27 +1518,31 @@
         var tall = bh >= 44;
         var mid = bh >= 30;
 
+        var head = "[" + l.kind + "] " + H.toTimeLabel(l.start_min) + "–" + H.toTimeLabel(l.end_min);
+
         if (tall) {
           ctx.globalAlpha = 0.8;
           ctx.font = font(400, 10.5);
-          ctx.fillText(clip(ctx, H.toTimeLabel(l.start_min) + "–" + H.toTimeLabel(l.end_min), inner), x + 6, y + 14);
+          ctx.fillText(clip(ctx, head, inner), x + 6, y + 14);
           ctx.globalAlpha = 1;
           ctx.font = font(700, 13);
           ctx.fillText(clip(ctx, l.student_name, inner), x + 6, y + 29);
-          ctx.globalAlpha = 0.8;
-          ctx.font = font(400, 10.5);
-          ctx.fillText(clip(ctx, c.second(l), inner), x + 6, y + 42);
-          ctx.globalAlpha = 1;
+          if (c.second(l)) {
+            ctx.globalAlpha = 0.8;
+            ctx.font = font(400, 10.5);
+            ctx.fillText(clip(ctx, c.second(l), inner), x + 6, y + 42);
+            ctx.globalAlpha = 1;
+          }
         } else if (mid) {
           ctx.globalAlpha = 0.8;
           ctx.font = font(400, 10);
-          ctx.fillText(clip(ctx, H.toTimeLabel(l.start_min), inner), x + 6, y + 12);
+          ctx.fillText(clip(ctx, head, inner), x + 6, y + 12);
           ctx.globalAlpha = 1;
           ctx.font = font(700, 12);
           ctx.fillText(clip(ctx, l.student_name, inner), x + 6, y + 25);
         } else {
           ctx.font = font(700, 11.5);
-          ctx.fillText(clip(ctx, l.student_name + " " + c.second(l), inner), x + 6, y + 13);
+          ctx.fillText(clip(ctx, l.student_name, inner), x + 6, y + 13);
         }
         ctx.restore();
       });

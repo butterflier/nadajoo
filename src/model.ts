@@ -44,6 +44,7 @@ export interface Lesson {
   date: string;        // YYYY-MM-DD (이 앱의 수업은 전부 하루짜리다)
   start_min: number;   // 자정 기준 분
   end_min: number;
+  content: string | null; // 무슨 수업인지 한 줄 — 블록 아래칸에 그대로 나온다
   memo: string | null;
 }
 
@@ -235,6 +236,7 @@ export function parseLesson(
     date,
     start_min: start,
     end_min: end,
+    content: text(body.content),
     memo: text(body.memo),
   };
 }
