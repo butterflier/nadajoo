@@ -718,6 +718,15 @@
    *  - 선생님별: 선생님이 하나로 고정이라 수업종류가 궁금하다
    *  - 날짜별:   칸이 선생님이라 어느 학생인지가 궁금하다
    */
+  /**
+   * 블록 가운데 굵은 줄에 무엇을 쓸까.
+   *  - 학생별: 학생이 고정이라 궁금한 건 어느 선생님인지다
+   *  - 그 밖:  학생 이름 (함께 듣는 수업이면 쉼표로 이어 붙인다)
+   */
+  function headlineOf(lesson, view) {
+    return view === "student" ? lesson.teacher + "T" : lesson.student_names.join(", ");
+  }
+
   function blockColorOf(lesson, view) {
     return view === "date" ? studentColorOf(lesson.student_ids[0] || "") : colorOf(lesson.kind);
   }
@@ -1116,7 +1125,7 @@
             (l.memo ? " · " + l.memo : "")) + '">' +
           '<span class="when">[' + esc(l.kind) + "] " +
             toTimeLabel(l.start_min) + "–" + toTimeLabel(l.end_min) + "</span>" +
-          '<span class="t">' + (l.online ? WIFI_SVG : "") + esc(l.student_names.join(", ")) + "</span>" +
+          '<span class="t">' + (l.online ? WIFI_SVG : "") + esc(headlineOf(l, state.view)) + "</span>" +
           (l.content ? '<span class="who">' + esc(l.content) + "</span>" : "") +
           "</button>";
       });
@@ -1634,6 +1643,7 @@
   window.__nadajoo = { state: state, render: render, load: load, helpers: {
     toTimeLabel: toTimeLabel, colorOf: colorOf, layout: layout, topPct: topPct,
     studentColorOf: studentColorOf, blockColorOf: blockColorOf, blockHits: blockHits,
+    headlineOf: headlineOf,
     DAY_START_MIN: DAY_START_MIN, DAY_END_MIN: DAY_END_MIN, HOURS: HOURS,
     DOW_LABELS: DOW_LABELS, addDays: addDays, dowOf: dowOf, parseDate: parseDate,
     mmdd: mmdd, esc: esc, teacherColumns: teacherColumns, dateColumns: dateColumns
@@ -1748,9 +1758,7 @@
         }),
         blocks: byStudent ? blocksFor(null, label, state.student) : blocksFor(state.teacher, label),
         // 학생별 시간표에서는 아래칸에 선생님을 적는 게 더 쓸모 있다
-        second: byStudent
-          ? function (l) { return l.teacher + "T" + (l.content ? " · " + l.content : ""); }
-          : function (l) { return l.content || ""; }
+        second: function (l) { return l.content || ""; }
       });
     }
 
@@ -2019,7 +2027,7 @@
       H.layout(c.items).forEach(function (p) {
         var l = p.item;
         var color = H.blockColorOf(l, state.view);
-        var names = l.student_names.join(", ");
+        var names = H.headlineOf(l, state.view);
         var laneW = (plan.colW - 4) / p.lanes;
         var x = gridX + i * plan.colW + 2 + p.lane * laneW;
         var y = bodyY + ((l.start_min - range.from) / span) * bodyH;
