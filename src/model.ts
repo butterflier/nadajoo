@@ -25,7 +25,7 @@ export const DAY_END_MIN = 24 * 60;
 export const SLOT_MIN = 30;
 
 /** 격자 빈 칸을 눌렀을 때 기본으로 잡히는 수업 길이. */
-export const DEFAULT_DURATION_MIN = 90;
+export const DEFAULT_DURATION_MIN = 120;
 
 export interface Student {
   id: string;          // Notion 페이지 ID
