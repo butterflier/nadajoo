@@ -100,14 +100,19 @@ export function parseTimeLabel(value: string): number | null {
   return min <= 1440 ? min : null;
 }
 
-/** 분을 "1시간 30분" 꼴로. 0이면 "0분". */
+/** 분을 "1시간 30분" 꼴로. 0이면 "0분". 음수는 부호를 뗀 크기로 적는다. */
 export function toDurationLabel(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
+  const abs = Math.abs(min);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
   if (h && m) return h + "시간 " + m + "분";
   if (h) return h + "시간";
   return m + "분";
 }
+
+/** 잔여 시간처럼 음수가 될 수 있는 값. 모자라면 "-2시간" 으로 적는다. */
+export const toSignedDurationLabel = (min: number) =>
+  (min < 0 ? "-" : "") + toDurationLabel(min);
 
 /** 분을 시간 단위 숫자로 (Notion 숫자 속성에 그대로 들어간다). 1.5 처럼 소수가 나온다. */
 export const minToHours = (min: number) => Math.round((min / 60) * 100) / 100;

@@ -760,11 +760,15 @@
   }
 
   function toDurationLabel(min) {
-    var h = Math.floor(min / 60), m = min % 60;
+    var abs = Math.abs(min);
+    var h = Math.floor(abs / 60), m = abs % 60;
     if (h && m) return h + "시간 " + m + "분";
     if (h) return h + "시간";
     return m + "분";
   }
+
+  /** 잔여처럼 음수가 될 수 있는 값. 모자라면 "-2시간". */
+  var toSigned = function (min) { return (min < 0 ? "-" : "") + toDurationLabel(min); };
 
   var parseDate = function (label) { return new Date(label + "T00:00:00Z"); };
   var toDateLabel = function (d) { return d.toISOString().slice(0, 10); };
@@ -920,7 +924,7 @@
         var b = me.balance;
         $("student-balance").textContent =
           "총 " + toDurationLabel(b.total_min) + " · 사용 " + toDurationLabel(b.used_min) +
-          " · 잔여 " + (b.remaining_min < 0 ? "-" + toDurationLabel(-b.remaining_min) : toDurationLabel(b.remaining_min));
+          " · 잔여 " + toSigned(b.remaining_min);
         renderGrid(studentColumns(), function (l) {
           return l.student_ids.indexOf(state.student) >= 0 ? l.date : null;
         });
@@ -1204,7 +1208,7 @@
         '<td class="num">' + toDurationLabel(b.total_min) + "</td>" +
         '<td class="num">' + toDurationLabel(b.used_min) + "</td>" +
         '<td class="num' + (low ? " low" : "") + '">' +
-          (b.remaining_min < 0 ? "-" + toDurationLabel(-b.remaining_min) : toDurationLabel(b.remaining_min)) +
+          toSigned(b.remaining_min) +
         "</td>" +
         '<td class="num planned">' + (b.planned_min ? toDurationLabel(b.planned_min) : "—") + "</td>" +
         "<td>" + esc(s.memo || "") + "</td>" +
@@ -1258,7 +1262,7 @@
     }
     $(boxId).innerHTML = shown.map(function (s) {
       var left = s.balance.remaining_min;
-      var tag = left < 0 ? "초과 " + toDurationLabel(-left) : "잔여 " + toDurationLabel(left);
+      var tag = "잔여 " + toSigned(left);
       return '<label class="check"><input type="checkbox" value="' + esc(s.id) + '"' +
         (picked.indexOf(s.id) >= 0 ? " checked" : "") + " />" +
         '<span class="who">' + esc(s.name) + '</span>' +
@@ -1349,15 +1353,26 @@
     };
   }
 
-  /** 겹치면 서버가 409로 되물어 본다. 확인하면 force 를 달아 한 번 더 보낸다. */
+  /**
+   * 서버가 409로 물어보면 사람에게 확인하고 다시 보낸다.
+   *
+   * 물어볼 게 여럿일 수 있어서(겹침 + 잔여 부족) 확인한 종류를 쌓아 보낸다.
+   * 하나로 뭉뚱그리면 겹침만 확인했는데 잔여 부족까지 조용히 지나가 버린다.
+   */
   async function saveOne(path, method, payload) {
-    try {
-      return await api(path, method, payload);
-    } catch (err) {
-      if (err.status !== 409 || !err.conflict) throw err;
-      if (!confirm(err.conflict.message)) return { skipped: true };
-      return await api(path, method, Object.assign({}, payload, { force: true }));
+    var acks = [];
+    for (var round = 0; round < 6; round++) {
+      try {
+        return await api(path, method, acks.length ? Object.assign({}, payload, { force: acks }) : payload);
+      } catch (err) {
+        if (err.status !== 409 || !err.conflict) throw err;
+        if (!confirm(err.conflict.message)) return { skipped: true };
+        // 같은 것을 또 물어보면 서버와 어긋난 것이다 — 무한 반복을 막는다
+        if (acks.indexOf(err.conflict.type) >= 0) throw err;
+        acks.push(err.conflict.type);
+      }
     }
+    throw new Error("확인이 너무 여러 번 필요합니다. 새로고침 후 다시 해 주세요.");
   }
 
   $("form-lesson").addEventListener("submit", async function (e) {
@@ -1367,24 +1382,22 @@
 
     $("btn-save").disabled = true;
     try {
-      var notes = [];
+      // 잔여 부족·겹침은 saveOne 이 저장 전에 물어본다. 여기서는 결과만 센다.
+      var skipped = 0;
       if (state.editingLesson) {
         var res = await saveOne("/api/lessons/" + state.editingLesson.id, "PUT", collected);
-        if (res.warning) notes.push(res.warning);
+        if (res.skipped) skipped++;
       } else {
         var weeks = Number($("f-repeat").value) || 1;
-        var skipped = 0;
         for (var i = 0; i < weeks; i++) {
           var one = Object.assign({}, collected, { date: addDays(collected.date, i * 7) });
           var r = await saveOne("/api/lessons", "POST", one);
           if (r.skipped) skipped++;
-          else if (r.warning) notes.push(r.warning);
         }
-        if (skipped) notes.push(skipped + "주치는 건너뛰었습니다.");
       }
       closeLesson();
       await load();
-      banner(notes.join(" "));
+      if (skipped) banner(skipped + "건은 취소하셔서 넣지 않았습니다.");
     } catch (err) {
       $("lesson-msg").textContent = err.message;
     } finally {
@@ -1540,7 +1553,7 @@
       var b = student.balance;
       $("s-balance").textContent =
         "총 " + toDurationLabel(b.total_min) + " · 사용 " + toDurationLabel(b.used_min) +
-        " · 잔여 " + (b.remaining_min < 0 ? "-" + toDurationLabel(-b.remaining_min) : toDurationLabel(b.remaining_min)) +
+        " · 잔여 " + toSigned(b.remaining_min) +
         (b.planned_min ? " · 아직 차감 전인 예정 " + toDurationLabel(b.planned_min) : "");
 
       var mine = lessonsOf(student.id).slice().sort(function (a, b2) {

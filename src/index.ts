@@ -17,6 +17,7 @@ import {
   parseLesson,
   parseStudent,
   toDurationLabel,
+  toSignedDurationLabel,
   todayInSeoul,
   type Block,
   type BlockInput,
@@ -78,6 +79,17 @@ function checkPassword(env: Env, request: Request, body: Record<string, unknown>
   return null;
 }
 
+/**
+ * 화면이 "확인"을 누른 겹침의 종류들. 예전 방식(force: true)도 받아 준다.
+ *
+ * 하나로 뭉뚱그리면 학생 겹침을 확인한 것만으로 잔여 시간 경고까지 조용히
+ * 지나가 버린다. 종류별로 따로 확인받는다.
+ */
+function acked(body: Record<string, unknown>, type: string): boolean {
+  if (body.force === true) return true;
+  return Array.isArray(body.force) && body.force.includes(type);
+}
+
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const body = await request.json();
@@ -132,12 +144,13 @@ async function handleData(env: Env): Promise<Response> {
 }
 
 /**
- * 잔여 시간이 모자라면 막지는 않고 알려만 준다 — 판단은 부원장이 한다.
+ * 잔여 시간이 모자란 학생이 있으면 물어볼 문구를, 없으면 null.
  *
- * 두 명이 함께 듣는 수업이어도 각자 수업 길이만큼 온전히 차감되므로,
+ * 막지는 않는다 — 확인을 누르면 그대로 넣는다. 판단은 부원장이 한다.
+ * 두 명이 함께 듣는 수업이어도 각자 수업 길이만큼 온전히 차감되므로
  * 학생마다 따로 센다.
  */
-function shortageWarning(
+function shortageMessage(
   studentIds: string[],
   addedMin: number,
   students: Student[],
@@ -150,13 +163,13 @@ function shortageWarning(
     if (!student) continue;
     const left = balanceOf(student, lessons, today).remaining_min;
     if (addedMin > left) {
-      short.push(student.name + " (잔여 " + toDurationLabel(Math.max(left, 0)) + ")");
+      short.push(student.name + " (잔여 " + toSignedDurationLabel(left) + ")");
     }
   }
   if (!short.length) return null;
   return (
-    short.join(", ") + " 학생의 잔여 시간이 모자랍니다 — 이 수업 " +
-    toDurationLabel(addedMin) + "."
+    short.join(", ") + " 학생의 잔여시간이 모자랍니다. 이 수업은 " +
+    toDurationLabel(addedMin) + "입니다. 수업을 추가할까요?"
   );
 }
 
@@ -177,11 +190,10 @@ async function saveLesson(
   const parsed = parseLesson(body, students);
   if (typeof parsed === "string") return bad(parsed);
 
-  const force = body.force === true;
   const conflicts = findConflicts(parsed, lessons, blocks, existingId ?? undefined);
 
   // 정규수업이나 휴가가 깔려 있는 시간 — 학생 겹침보다 먼저 알려 준다
-  if (!force && conflicts.blocked) {
+  if (!acked(body, "blocked") && conflicts.blocked) {
     const b = conflicts.blocked;
     return json(
       {
@@ -197,7 +209,7 @@ async function saveLesson(
     );
   }
 
-  if (!force && conflicts.student) {
+  if (!acked(body, "student") && conflicts.student) {
     return json(
       {
         conflict: {
@@ -209,7 +221,7 @@ async function saveLesson(
       409,
     );
   }
-  if (!force && conflicts.teacher) {
+  if (!acked(body, "teacher") && conflicts.teacher) {
     return json(
       {
         conflict: {
@@ -224,26 +236,31 @@ async function saveLesson(
     );
   }
 
-  // 학생 겹침을 확인받고 진행하는 경우 = 옮겨오기. 기존 등록을 지운다.
-  const moved = force && conflicts.student ? conflicts.student : null;
-  if (moved) await archiveLesson(env, moved.id);
+  const moved = conflicts.student; // 확인을 받았으니 옮겨오기다 (아직 지우지는 않는다)
 
-  // 경고는 방금 옮겨온/수정 중인 수업을 뺀 나머지 기준으로 센다
+  // 잔여 시간은 방금 옮겨올/수정 중인 수업을 뺀 나머지 기준으로 센다
   const others = lessons.filter((l) => l.id !== existingId && l.id !== moved?.id);
-  const warning = shortageWarning(
+  const shortage = shortageMessage(
     parsed.student_ids,
     parsed.end_min - parsed.start_min,
     students,
     others,
     todayInSeoul(),
   );
+  // 모자라도 막지 않는다 — 물어보고, 확인하면 그대로 넣는다
+  if (!acked(body, "shortage") && shortage) {
+    return json({ conflict: { type: "shortage", message: shortage } }, 409);
+  }
+
+  // 여기부터가 실제로 쓰는 구간. 물어볼 것을 다 물어본 뒤에야 지운다.
+  if (moved) await archiveLesson(env, moved.id);
 
   let id = existingId;
   if (existingId) await updateLesson(env, existingId, parsed as LessonInput);
   else id = await createLesson(env, parsed as LessonInput);
 
   dropCache();
-  return json({ id, moved: moved?.id ?? null, warning });
+  return json({ id, moved: moved?.id ?? null });
 }
 
 /**
@@ -260,7 +277,7 @@ async function saveBlock(
   const parsed = parseBlock(body, students);
   if (typeof parsed === "string") return bad(parsed);
 
-  if (body.force !== true) {
+  if (!acked(body, "lessons-under")) {
     const hit = lessons.filter(
       (l) =>
         (parsed.teacher === null || l.teacher === parsed.teacher) &&
@@ -362,7 +379,9 @@ export default {
       const student = url.pathname.match(new RegExp("^/api/students/" + ID_RE + "$"));
       if (student) {
         if (method === "PUT") return await saveStudent(env, body ?? {}, student[1]);
-        if (method === "DELETE") return await removeStudent(env, student[1], body?.force === true);
+        if (method === "DELETE") {
+          return await removeStudent(env, student[1], acked(body ?? {}, "student-lessons"));
+        }
         return bad("허용되지 않는 메서드입니다.", 405);
       }
 
