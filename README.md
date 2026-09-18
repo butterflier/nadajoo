@@ -250,6 +250,22 @@ Notion에서 속성 이름을 바꾸면 `src/notion.ts` 의 `S` / `L` / `B` 상�
 
 ### 2. 배포
 
+`main` 에 푸시되면 **GitHub Actions가 알아서 배포합니다**
+(`.github/workflows/deploy.yml`). 평소에는 아무것도 안 하셔도 됩니다.
+
+그러려면 저장소에 시크릿 두 개를 한 번만 넣어 두어야 합니다
+(GitHub → Settings → Secrets and variables → Actions → New repository secret):
+
+| 이름 | 값 |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | 권한은 **Workers Scripts: Edit** 하나면 됩니다 |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 대시보드 오른쪽 아래 |
+
+배포가 잘 됐는지는 저장소의 **Actions** 탭에서 봅니다.
+타입이 깨져 있으면 배포 전에 막힙니다.
+
+손으로 배포해야 할 때 (Actions가 막혔거나 급할 때):
+
 ```bash
 git pull origin main
 npm install

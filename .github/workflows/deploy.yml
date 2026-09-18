@@ -1,0 +1,42 @@
+# main 에 푸시되면 스스로 배포한다.
+#
+# 한 번만 해 두면 되는 준비 (GitHub 저장소 → Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   권한은 "Workers Scripts: Edit" 하나면 된다
+#   CLOUDFLARE_ACCOUNT_ID  Cloudflare 대시보드 오른쪽 아래에 있다
+#
+# 시크릿(SHARED_PASSWORD, NOTION_*)은 Cloudflare 에 남아 있고 배포가 건드리지
+# 않는다. 여기 워크플로에 적을 필요도 없다.
+name: 배포
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # GitHub 화면에서 손으로도 돌릴 수 있게
+
+concurrency:
+  # 연달아 푸시하면 마지막 것만 배포한다
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 타입이 깨진 채로 배포되지 않게 먼저 막는다
+      - name: 타입 확인
+        run: npx tsc --noEmit
+
+      - name: Cloudflare 에 배포
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
