@@ -50,6 +50,11 @@ import {
 export interface Env extends NotionEnv {
   ASSETS: Fetcher;
   SHARED_PASSWORD?: string;
+  /**
+   * 하루 한 번 백업을 떠 둘 곳. 없어도 앱은 그대로 돈다 —
+   * 버킷을 만들고 wrangler.jsonc 에 바인딩을 열어 주면 그때부터 쌓인다.
+   */
+  BACKUP?: R2Bucket;
 }
 
 const json = (data: unknown, status = 200) =>
@@ -514,6 +519,33 @@ async function removeStudent(env: Env, id: string, force: boolean): Promise<Resp
   return json({ ok: true, removed_lessons: mine.length });
 }
 
+/**
+ * 지금 들어 있는 것 전부를 한 덩어리로.
+ *
+ * 공유 비밀번호 하나로 누구나 지울 수 있는 구조라, 되돌릴 수 있는 사본이
+ * 안전망이다. Notion 이 원본이므로 여기 담는 건 읽은 그대로다.
+ */
+async function snapshot(env: Env): Promise<{ body: string; name: string }> {
+  const { students, lessons, blocks } = await loadAll(env);
+  const at = new Date().toISOString();
+  const body = JSON.stringify(
+    {
+      app: "nadajoo",
+      taken_at: at,
+      today: todayInSeoul(),
+      teachers: TEACHERS,
+      kinds: KINDS,
+      counts: { students: students.length, lessons: lessons.length, blocks: blocks.length },
+      students,
+      lessons,
+      blocks,
+    },
+    null,
+    1,
+  );
+  return { body, name: "나다주_백업_" + at.slice(0, 10) + ".json" };
+}
+
 // Notion 페이지 ID는 하이픈이 있을 수도, 없을 수도 있다
 const ID_RE = "([0-9a-fA-F-]{32,36})";
 
@@ -568,6 +600,19 @@ export default {
       if (url.pathname === "/api/login" && method === "POST") return json({ ok: true });
 
       if (url.pathname === "/api/data" && method === "GET") return await handleData(env);
+
+      // 지금 것을 통째로 내려받는다. 화면의 "백업" 단추가 이걸 부른다.
+      if (url.pathname === "/api/backup" && method === "GET") {
+        const shot = await snapshot(env);
+        return new Response(shot.body, {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "content-disposition":
+              "attachment; filename*=UTF-8''" + encodeURIComponent(shot.name),
+            "cache-control": "no-store",
+          },
+        });
+      }
 
       if (url.pathname === "/api/students") {
         if (method === "POST") return await saveStudent(env, body ?? {}, null);
@@ -638,5 +683,36 @@ export default {
       console.error(err);
       return bad("서버 오류가 발생했습니다.", 500);
     }
+  },
+
+  /**
+   * 하루 한 번(wrangler.jsonc 의 crons) 백업을 떠 R2 에 넣는다.
+   *
+   * 버킷 바인딩이 없으면 아무것도 하지 않는다 — 없다고 앱이 죽으면 안 된다.
+   * 만들려면: npx wrangler r2 bucket create nadajoo-backup
+   */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        if (!env.BACKUP) {
+          console.log("백업을 건너뜁니다 — BACKUP 버킷이 연결돼 있지 않습니다.");
+          return;
+        }
+        try {
+          const shot = await snapshot(env);
+          // 날짜별로 쌓아 두고, 가장 최근 것은 늘 같은 이름으로도 둔다
+          const key = "backup/" + shot.name;
+          await env.BACKUP.put(key, shot.body, {
+            httpMetadata: { contentType: "application/json; charset=utf-8" },
+          });
+          await env.BACKUP.put("backup/latest.json", shot.body, {
+            httpMetadata: { contentType: "application/json; charset=utf-8" },
+          });
+          console.log("백업 완료 " + key + " (" + shot.body.length + " bytes)");
+        } catch (err) {
+          console.error("백업 실패", err);
+        }
+      })(),
+    );
   },
 } satisfies ExportedHandler<Env>;

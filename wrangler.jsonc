@@ -14,6 +14,20 @@
   //   NOTION_STUDENT_DB   "나다주 학생" 데이터베이스 ID
   //   NOTION_LESSON_DB    "나다주 수업" 데이터베이스 ID
   //   NOTION_BLOCK_DB     "나다주 수업불가" 데이터베이스 ID (없으면 수업불가 기능만 꺼진다)
+  // 하루 한 번 백업. 18:00 UTC = 다음 날 새벽 3시 (서울)
+  "triggers": {
+    "crons": ["0 18 * * *"]
+  },
+
+  // 백업을 떠 둘 곳. 버킷을 만든 뒤 아래 세 줄의 주석을 벗기면 그때부터 쌓인다.
+  // 없어도 앱은 그대로 돈다 — scheduled() 가 바인딩이 없으면 그냥 넘어간다.
+  //
+  //   npx wrangler r2 bucket create nadajoo-backup
+  //
+  // "r2_buckets": [
+  //   { "binding": "BACKUP", "bucket_name": "nadajoo-backup" }
+  // ],
+
   "observability": {
     "enabled": true
   }

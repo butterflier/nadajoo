@@ -146,6 +146,8 @@
     teacher: null,
     narrow: NARROW.matches,
     signature: "",        // 자료가 바뀌었는지 보는 지문
+    span: "week",         // 정산 기간 — 주간 / 월간
+    reportAt: "",
     student: null,        // 학생별 뷰에서 보고 있는 학생 id
     pickedStudents: [],   // 수업 등록 창에서 고른 학생들
     pickedBlockStudents: [],
@@ -335,11 +337,14 @@
 
   // ── 그리기 ──────────────────────────────────────
   function render() {
-    var calendar = state.view !== "students";
+    var calendar = state.view === "teacher" || state.view === "date" || state.view === "student";
     $("bar-teacher").hidden = state.view !== "teacher";
     $("bar-date").hidden = state.view !== "date";
     $("bar-student").hidden = state.view !== "student";
+    $("bar-report").hidden = state.view !== "report";
     $("btn-png").hidden = !calendar;
+    $("btn-csv").hidden = state.view !== "report";
+    if (!state.reportAt) state.reportAt = state.data.today;
 
     var today = state.data.today;
     $("meta").textContent = "오늘 " + today + " · 학생 " + state.data.students.length + "명";
@@ -379,6 +384,10 @@
         return l.date === state.day ? l.teacher : null;
       });
       $("hint").textContent = "선생님들을 하루 단위로 나란히 봅니다. 빈 칸을 누르면 그 선생님으로 등록 창이 열립니다.";
+    } else if (state.view === "report") {
+      renderReport();
+      $("hint").textContent = "선생님 합계는 가르친 시간입니다 — 함께 듣는 수업도 한 번으로 셉니다. " +
+        "학생 사용은 각자 온전히 셉니다. 수업불가는 수업이 아니라 빠집니다.";
     } else {
       renderStudents();
       $("hint").textContent = "잔여 시간은 저장하지 않고 매번 계산합니다 — 수업일 00시가 지나면 차감된 것으로 봅니다. 학생을 누르면 시간 조정과 메모를 할 수 있습니다.";
@@ -774,6 +783,253 @@
   else NARROW.addListener(onNarrowChange);
   $("pick-student").addEventListener("change", function () { state.student = this.value; render(); });
   $("btn-refresh").addEventListener("click", function () { load(); });
+
+  /**
+   * 지금 들어 있는 것 전부를 JSON 으로 내려받는다.
+   *
+   * fetch 로 받아서 저장한다 — 주소를 그냥 열면 비밀번호 머리가 안 실려 401 이 된다.
+   */
+  $("btn-backup").addEventListener("click", async function () {
+    var btn = this;
+    btn.disabled = true;
+    try {
+      var res = await fetch("/api/backup", {
+        headers: { "x-password": state.password },
+        cache: "no-store"
+      });
+      if (!res.ok) throw new Error("백업을 받지 못했습니다 (" + res.status + ")");
+      var blob = await res.blob();
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "나다주_백업_" + state.data.today + ".json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── 정산 ────────────────────────────────────────
+
+  /** 보고 있는 기간. 주간이면 월~일, 월간이면 그 달 1일~말일. */
+  function reportRange() {
+    if (state.span === "month") {
+      var d = parseDate(state.reportAt);
+      var y = d.getUTCFullYear(), m = d.getUTCMonth();
+      var first = new Date(Date.UTC(y, m, 1));
+      var last = new Date(Date.UTC(y, m + 1, 0));
+      return { from: toDateLabel(first), to: toDateLabel(last), label: y + "년 " + (m + 1) + "월" };
+    }
+    var start = weekStartOf(state.reportAt);
+    var end = addDays(start, 6);
+    return { from: start, to: end, label: start + " ~ " + end };
+  }
+
+  /** 기간 안의 수업만. 수업불가는 수업이 아니므로 세지 않는다. */
+  function lessonsInRange(r) {
+    return (state.data.lessons || []).filter(function (l) {
+      return l.date >= r.from && l.date <= r.to;
+    });
+  }
+
+  /**
+   * 선생님 × 수업종류 시간 합계.
+   *
+   * 함께 듣는 수업은 **선생님이 한 번 한 수업**이다. 학생 수만큼 곱하지 않는다 —
+   * 선생님 정산은 가르친 시간이지 받은 사람 수가 아니다.
+   */
+  function teacherTotals(rows) {
+    var kinds = state.data.kinds;
+    var out = state.data.teachers.map(function (t) {
+      var by = {}; kinds.forEach(function (k) { by[k] = 0; });
+      var online = 0, offline = 0, total = 0;
+      rows.forEach(function (l) {
+        if (l.teacher !== t) return;
+        var min = l.end_min - l.start_min;
+        by[l.kind] = (by[l.kind] || 0) + min;
+        if (l.online) online += min; else offline += min;
+        total += min;
+      });
+      return { teacher: t, by: by, online: online, offline: offline, total: total };
+    });
+    return out;
+  }
+
+  /**
+   * 학생별 사용 시간. 여기서는 **학생마다 온전히** 센다 —
+   * 함께 듣는 수업도 각자 그 길이만큼 차감되기 때문이다.
+   */
+  function studentTotals(rows) {
+    return (state.data.students || []).map(function (st) {
+      var used = 0, count = 0;
+      rows.forEach(function (l) {
+        if (l.student_ids.indexOf(st.id) < 0) return;
+        used += l.end_min - l.start_min;
+        count++;
+      });
+      return { student: st, used: used, count: count };
+    }).filter(function (x) { return x.count > 0; });
+  }
+
+  var cell = function (min) {
+    return min ? toDurationLabel(min) : '<span class="zero">—</span>';
+  };
+
+  function renderReport() {
+    var r = reportRange();
+    $("rp-label").textContent = r.label;
+    var rows = lessonsInRange(r);
+
+    if (!rows.length) {
+      $("sheet").innerHTML = '<div class="empty">' + esc(r.label) + " 에는 수업이 없습니다.</div>";
+      return;
+    }
+
+    var kinds = state.data.kinds;
+    var tt = teacherTotals(rows);
+    var sum = { by: {}, online: 0, offline: 0, total: 0 };
+    kinds.forEach(function (k) { sum.by[k] = 0; });
+    tt.forEach(function (t) {
+      kinds.forEach(function (k) { sum.by[k] += t.by[k]; });
+      sum.online += t.online; sum.offline += t.offline; sum.total += t.total;
+    });
+
+    var head = "<tr><th>선생님</th>" +
+      kinds.map(function (k) { return '<th class="num">' + esc(k) + "</th>"; }).join("") +
+      '<th class="num">온라인</th><th class="num">대면</th><th class="num">합계</th></tr>';
+
+    var body = tt.map(function (t) {
+      return "<tr><td class=\"name\">" + esc(t.teacher) + "</td>" +
+        kinds.map(function (k) { return '<td class="num">' + cell(t.by[k]) + "</td>"; }).join("") +
+        '<td class="num">' + cell(t.online) + "</td>" +
+        '<td class="num">' + cell(t.offline) + "</td>" +
+        '<td class="num">' + cell(t.total) + "</td></tr>";
+    }).join("") +
+      '<tr class="sum"><td>합계</td>' +
+      kinds.map(function (k) { return '<td class="num">' + cell(sum.by[k]) + "</td>"; }).join("") +
+      '<td class="num">' + cell(sum.online) + "</td>" +
+      '<td class="num">' + cell(sum.offline) + "</td>" +
+      '<td class="num">' + cell(sum.total) + "</td></tr>";
+
+    var st = studentTotals(rows).sort(function (a, b) { return b.used - a.used; });
+    var stRows = st.map(function (x) {
+      var b = x.student.balance;
+      return '<tr><td class="name">' + esc(x.student.name) + "</td>" +
+        '<td class="num">' + x.count + "회</td>" +
+        '<td class="num">' + cell(x.used) + "</td>" +
+        '<td class="num">' + toDurationLabel(b.total_min) + "</td>" +
+        '<td class="num' + (b.remaining_min <= 0 ? " low" : "") + '">' + toSigned(b.remaining_min) + "</td></tr>";
+    }).join("");
+
+    $("sheet").innerHTML =
+      '<div class="report">' +
+      "<h3>선생님별 수업 시간</h3>" +
+      '<table class="table"><thead>' + head + "</thead><tbody>" + body + "</tbody></table>" +
+      "<h3>학생별 사용 — 이 기간</h3>" +
+      '<table class="table"><thead><tr><th>학생</th><th class="num">횟수</th>' +
+      '<th class="num">사용</th><th class="num">총 시간</th><th class="num">잔여</th>' +
+      "</tr></thead><tbody>" + stRows + "</tbody></table>" +
+      "</div>";
+  }
+
+  $("bar-report").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-span]");
+    if (!btn) return;
+    state.span = btn.dataset.span;
+    Array.prototype.forEach.call(btn.parentNode.children, function (b) {
+      b.classList.toggle("is-active", b === btn);
+    });
+    render();
+  });
+  $("rp-prev").addEventListener("click", function () { shiftReport(-1); });
+  $("rp-next").addEventListener("click", function () { shiftReport(1); });
+  $("rp-now").addEventListener("click", function () {
+    state.reportAt = state.data.today;
+    render();
+  });
+
+  function shiftReport(dir) {
+    if (state.span === "month") {
+      var d = parseDate(state.reportAt);
+      state.reportAt = toDateLabel(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + dir, 1)));
+    } else {
+      state.reportAt = addDays(state.reportAt, dir * 7);
+    }
+    render();
+  }
+
+  /**
+   * CSV 한 줄. 쉼표·따옴표·줄바꿈이 들어가면 따옴표로 감싼다.
+   */
+  function csvRow(cells) {
+    return cells.map(function (c) {
+      var v = String(c == null ? "" : c);
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }).join(",");
+  }
+
+  /** 분을 정산용 숫자로. 1시간 30분 → 1.5 */
+  var toHours = function (min) { return Math.round((min / 60) * 100) / 100; };
+
+  function downloadCsv(name, rows) {
+    // 엑셀이 한글을 깨뜨리지 않게 맨 앞에 BOM 을 붙인다
+    var text = "\uFEFF" + rows.map(csvRow).join("\r\n") + "\r\n";
+    var url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  $("btn-csv").addEventListener("click", function () {
+    var r = reportRange();
+    var rows = lessonsInRange(r);
+    var kinds = state.data.kinds;
+    var out = [];
+
+    out.push(["나다주앱 정산", r.label]);
+    out.push([]);
+    out.push(["선생님별 수업 시간 (시간)"]);
+    out.push(["선생님"].concat(kinds, ["온라인", "대면", "합계"]));
+    teacherTotals(rows).forEach(function (t) {
+      out.push([t.teacher].concat(
+        kinds.map(function (k) { return toHours(t.by[k]); }),
+        [toHours(t.online), toHours(t.offline), toHours(t.total)],
+      ));
+    });
+
+    out.push([]);
+    out.push(["학생별 사용 (시간)"]);
+    out.push(["학생", "횟수", "사용", "총 시간", "잔여"]);
+    studentTotals(rows).sort(function (a, b) { return b.used - a.used; }).forEach(function (x) {
+      var b = x.student.balance;
+      out.push([x.student.name, x.count, toHours(x.used),
+        toHours(b.total_min), toHours(b.remaining_min)]);
+    });
+
+    out.push([]);
+    out.push(["수업 한 건씩"]);
+    out.push(["날짜", "시작", "종료", "시간", "선생님", "수업종류", "학생", "수업내용", "온라인", "메모"]);
+    rows.slice().sort(function (a, b) {
+      return a.date.localeCompare(b.date) || a.start_min - b.start_min;
+    }).forEach(function (l) {
+      out.push([
+        l.date, toTimeLabel(l.start_min), toTimeLabel(l.end_min),
+        toHours(l.end_min - l.start_min), l.teacher, l.kind,
+        l.student_names.join(" "), l.content || "", l.online ? "O" : "", l.memo || "",
+      ]);
+    });
+
+    downloadCsv("나다주_정산_" + r.label.replace(/[ ~]/g, "") + ".csv", out);
+  });
 
   // ── 학생 관리 ───────────────────────────────────
   function renderStudents() {

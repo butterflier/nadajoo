@@ -334,6 +334,25 @@
   .table .name { font-weight: 600; font-size: 14px; }
   .table .low { color: var(--danger); font-weight: 600; }
   .table .planned { color: var(--ink-soft); font-size: 12px; }
+  /* 합계 줄은 위에 선 하나를 더 긋고 굵게 */
+  .table tr.sum td {
+    border-top: var(--line-w) solid var(--ink-soft);
+    font-weight: 700;
+    background: #F7F9FC;
+  }
+  .table tbody tr.sum:hover { background: #F7F9FC; }
+  .table .zero { color: #C3C9D2; }
+
+  /* 정산은 표가 여럿이라 사이를 띄우고 이름을 붙인다 */
+  .report { padding: 4px 0 8px; }
+  .report h3 {
+    margin: 18px 12px 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+  }
+  .report h3:first-child { margin-top: 10px; }
 
   /* ── 모달 ─────────────────────────────────────── */
   .scrim {
@@ -587,10 +606,13 @@
       <button class="btn" type="button" data-view="date">날짜별</button>
       <button class="btn" type="button" data-view="student">학생별</button>
       <button class="btn" type="button" data-view="students">학생 관리</button>
+      <button class="btn" type="button" data-view="report">정산</button>
     </div>
     <span class="spacer"></span>
     <button class="btn" type="button" id="btn-refresh">새로고침</button>
     <button class="btn" type="button" id="btn-png">PNG 저장</button>
+    <button class="btn" type="button" id="btn-csv" hidden>CSV 저장</button>
+    <button class="btn" type="button" id="btn-backup">백업</button>
     <button class="btn" type="button" id="btn-new-student">학생 등록</button>
     <button class="btn" type="button" id="btn-new-block">수업불가 추가</button>
     <button class="btn primary" type="button" id="btn-new-lesson">수업 등록</button>
@@ -618,6 +640,20 @@
       <button class="btn" type="button" id="sw-today">이번 주</button>
       <button class="btn" type="button" id="sw-next">&rsaquo;</button>
       <span class="nav-label" id="sw-label"></span>
+    </div>
+  </div>
+
+  <div class="toolbar" id="bar-report" hidden>
+    <div class="picker">
+      <button class="btn is-active" type="button" data-span="week">주간</button>
+      <button class="btn" type="button" data-span="month">월간</button>
+    </div>
+    <span class="spacer"></span>
+    <div class="nav">
+      <button class="btn" type="button" id="rp-prev">&lsaquo;</button>
+      <button class="btn" type="button" id="rp-now">이번</button>
+      <button class="btn" type="button" id="rp-next">&rsaquo;</button>
+      <span class="nav-label" id="rp-label"></span>
     </div>
   </div>
 
