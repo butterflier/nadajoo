@@ -524,8 +524,12 @@
     :root { --time-col: 42px; --hour: 46px; }
     .tick { right: 5px; font-size: 10.5px; }
 
-    .lesson .when, .lesson .who { font-size: 11.5px; }
-    .lesson .t { font-size: 14px; }
+    .lesson { padding: 3px 5px; }
+    .lesson .when, .lesson .who { font-size: 10.5px; }
+    .lesson .t { font-size: 13px; }
+
+    /* 넘어가는 동안 옆으로 삐져나가는 것을 감춘다 */
+    .wrap { overflow-x: clip; }
 
     /* 창은 화면을 꽉 채운다 — 작은 화면에서 떠 있는 상자는 답답하다 */
     .scrim { padding: 0; align-items: stretch; }

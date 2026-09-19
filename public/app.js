@@ -14,6 +14,12 @@
      한 칸이 50px 도 안 돼서 읽히지도, 눌리지도 않는다. */
   var NARROW = window.matchMedia("(max-width: 640px)");
 
+  /** 좁은 화면에서 주간 뷰가 한 번에 보이는 날 수. 넘길 때도 이만큼 움직인다. */
+  var NARROW_DAYS = 2;
+
+  /** 움직임을 줄여 달라고 해 둔 기기에서는 넘기는 효과를 뺀다. */
+  var CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+
   /* 수업종류별 색. 블록만 보고 종류를 알아볼 수 있게 한다. */
   var KIND_COLOR = {
     "본고사": { bg: "#EDF3FE", line: "#BBD0F7", ink: "#1B3F8F" },
@@ -343,9 +349,10 @@
    * 넓으면 월~일 이레, 좁으면 보고 있는 하루뿐이다.
    */
   function weekDays() {
-    if (state.narrow) return [state.day];
+    var n = state.narrow ? NARROW_DAYS : 7;
+    var from = state.narrow ? state.day : state.weekStart;
     var out = [];
-    for (var i = 0; i < 7; i++) out.push(addDays(state.weekStart, i));
+    for (var i = 0; i < n; i++) out.push(addDays(from, i));
     return out;
   }
 
@@ -429,7 +436,8 @@
   /** 지금 보고 있는 범위를 글로. 좁은 화면은 하루뿐이라 날짜와 요일을 적는다. */
   function rangeLabel() {
     if (!state.narrow) return state.weekStart + " ~ " + addDays(state.weekStart, 6);
-    return state.day + " (" + DOW_LABELS[dowOf(parseDate(state.day))] + ")";
+    var last = addDays(state.day, NARROW_DAYS - 1);
+    return NARROW_DAYS > 1 ? mmdd(state.day) + " ~ " + mmdd(last) : state.day;
   }
 
   var HOURS = (DAY_END_MIN - DAY_START_MIN) / 60;
@@ -487,8 +495,8 @@
       if (key !== null && byCol[key]) byCol[key].push(l);
     });
 
-    // 칸이 하나면 최소폭을 걸지 않는다 — 걸면 좁은 화면에서 가로로 밀린다
-    var minW = state.narrow && cols.length === 1 ? 0 : (cols.length > 5 ? 112 : 176);
+    // 좁은 화면에서는 최소폭을 걸지 않는다 — 걸면 화면 밖으로 밀린다
+    var minW = state.narrow ? 0 : (cols.length > 5 ? 112 : 176);
     var html = '<div class="grid" style="grid-template-columns: var(--time-col) repeat(' +
       cols.length + ", minmax(" + minW + 'px, 1fr));">';
 
@@ -604,14 +612,53 @@
    * 앞뒤로 넘기기. 좁은 화면의 주간 뷰는 하루씩, 넓으면 한 주씩 움직인다.
    * 날짜별 뷰는 언제나 하루씩이다.
    */
+  /** 한 번에 몇 날을 움직일까. 보이는 만큼 움직여야 겹치지 않고 넘어간다. */
+  function stepDays() {
+    if (state.view === "date") return 1;          // 날짜별은 언제나 하루씩
+    return state.narrow ? NARROW_DAYS : 7;
+  }
+
   function step(dir) {
-    if (state.view === "date" || state.narrow) {
-      state.day = addDays(state.day, dir);
-      state.weekStart = weekStartOf(state.day);   // 넓은 화면으로 돌아가도 그 주가 보이게
-    } else {
-      state.weekStart = addDays(state.weekStart, dir * 7);
-    }
-    render();
+    var move = function () {
+      if (state.view === "date" || state.narrow) {
+        state.day = addDays(state.day, dir * stepDays());
+        state.weekStart = weekStartOf(state.day); // 넓은 화면으로 돌아가도 그 주가 보이게
+      } else {
+        state.weekStart = addDays(state.weekStart, dir * 7);
+      }
+      render();
+    };
+    if (state.narrow && !CALM.matches) slide(dir, move);
+    else move();
+  }
+
+  /**
+   * 넘어가는 효과. 가던 쪽으로 밀려 나갔다가 반대쪽에서 들어온다.
+   *
+   * 끝나면 transform 을 지운다 — 남겨 두면 그 요소가 위치 기준이 되어
+   * 요일 머리의 sticky 가 흔들린다.
+   */
+  function slide(dir, move) {
+    var el = $("sheet");
+    var out = dir > 0 ? -26 : 26;
+
+    el.style.transition = "transform .13s ease-in, opacity .13s ease-in";
+    el.style.transform = "translateX(" + out + "px)";
+    el.style.opacity = "0";
+
+    setTimeout(function () {
+      move();
+      el.style.transition = "none";
+      el.style.transform = "translateX(" + -out + "px)";
+      void el.offsetWidth;                       // 여기서 한 번 끊어 줘야 되돌아오는 게 보인다
+      el.style.transition = "transform .16s ease-out, opacity .16s ease-out";
+      el.style.transform = "";
+      el.style.opacity = "1";
+      setTimeout(function () {
+        el.style.transition = "";
+        el.style.transform = "";
+      }, 180);
+    }, 130);
   }
 
   function goToday() {
