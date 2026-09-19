@@ -185,18 +185,20 @@ CSV 에는 합계 두 표에 더해 **수업 한 건씩**도 들어갑니다. �
 내려받습니다. 공유 비밀번호 하나로 누구나 지울 수 있는 구조라, 되돌릴 수 있는
 사본이 안전망입니다.
 
-**하루 한 번 자동으로 떠 두려면** 버킷을 한 번 만들어야 합니다:
-
-```bash
-npx wrangler r2 bucket create nadajoo-backup
-```
-
-만든 뒤 `wrangler.jsonc` 의 `r2_buckets` 세 줄에서 주석을 벗기고 배포하면,
-매일 새벽 3시(서울)에 `backup/나다주_백업_YYYY-MM-DD.json` 으로 쌓입니다.
+**하루 한 번 자동으로도 쌓입니다.** 매일 새벽 3시(서울)에 R2 버킷
+`nadajoo-backup` 의 `backup/나다주_백업_YYYY-MM-DD.json` 으로 들어가고,
 가장 최근 것은 `backup/latest.json` 에도 둡니다.
 
-버킷이 없어도 **앱은 그대로 돕니다** — 정해진 시각에 깨어나 바인딩이 없는 걸 보고
-그냥 넘어갑니다.
+받아 보려면:
+
+```bash
+npx wrangler r2 object get nadajoo-backup/backup/latest.json --file latest.json
+npx wrangler r2 object list nadajoo-backup --prefix backup/   # 쌓인 목록
+```
+
+> `wrangler.jsonc` 의 `r2_buckets` 는 버킷이 실제로 있어야 합니다. 버킷을 지우면
+> **배포가 실패합니다** — 없앨 거면 그 세 줄도 같이 지우세요. 바인딩만 빠지면
+> Cron 은 깨어나 "버킷 없음" 을 적고 그냥 넘어갑니다.
 
 ### 수업불가 — 정규수업 · 휴가 · 연휴
 
