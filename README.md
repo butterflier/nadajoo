@@ -182,9 +182,11 @@ PNG는 가장 이른 수업~가장 늦은 수업에 앞뒤 한 시간씩만 남�
 wrangler.jsonc      Worker 설정
 src/model.ts        선생님·수업종류 상수, 시각·날짜 계산, 잔여시간, 겹침 판정
                     (저장소에 의존하지 않는 순수 로직)
-src/notion.ts       Notion 어댑터 — 속성 이름이 한국어 그대로다 (S · L 상수)
-src/index.ts        /api/* 라우터
-public/index.html   한 파일짜리 vanilla JS 앱 (화면 + 렌더링 + 폼 + PNG)
+src/notion.ts       Notion 어댑터 — 속성 이름이 한국어 그대로다 (S · L · B 상수)
+src/index.ts        /api/* 라우터 + 보안 응답 머리
+public/index.html   마크업과 스타일
+public/app.js       화면 — 렌더링 · 폼 · 통신
+public/png.js       PNG 내보내기 (app.js 의 window.__nadajoo 를 쓴다)
 public/fonts/       Paperlogy woff2 4종
 ```
 
@@ -247,6 +249,14 @@ Notion에서 속성 이름을 바꾸면 `src/notion.ts` 의 `S` / `L` / `B` 상�
   이게 뒤집히면 가로 스크롤 시 시간축이 블록에 가려집니다
 - **`.toolbar` 는 `display: flex`** — `hidden` 속성만으로는 안 숨겨져서
   `.toolbar[hidden] { display: none; }` 를 따로 두었습니다. 새 툴바를 추가할 때 주의
+- **`.field label` 이 `.check` 를 이깁니다** — 특이도가 높아서 `label.check` 로
+  써야 합니다. `.check` 로 쓰면 flex 레이아웃이 통째로 덮어씌워집니다
+- **`<input type="time">` 은 24:00 을 못 받습니다** — 00:00~23:59 만 받아서
+  `"24:00"` 을 넣으면 칸이 통째로 비어 버립니다. 종료 칸은 `toEndValue` / `endToMin`
+  으로 자정을 **00:00 으로 주고받습니다.** 내부 값은 그대로 1440분입니다
+- **화면 스크립트는 `public/app.js` 와 `public/png.js`** 두 파일입니다 (`png.js` 가
+  `app.js` 의 `window.__nadajoo` 를 쓰므로 **순서가 중요합니다**). 인라인으로 되돌리면
+  CSP 의 `script-src 'self'` 를 깨뜨립니다
 - **시간대는 `Asia/Seoul` 고정** (`src/model.ts` 의 `TIME_ZONE`). "오늘"이 여기서 갈립니다
 
 ---
@@ -322,10 +332,35 @@ Paperlogy 폰트 · 흰 배경 · 모서리 반경 4px · **box-shadow 전부 �
 
 ---
 
+## 보안
+
+공개 주소 하나로 열리고 **학생 연락처**를 다룹니다. 지금 걸려 있는 것:
+
+- `/api/*` 전부 `SHARED_PASSWORD` 로 잠김 (조회 포함). 비밀번호 없이 부르면 401
+- 응답 머리 — `x-robots-tag: noindex` · `x-content-type-options` · `referrer-policy` ·
+  `strict-transport-security` · CSP(`script-src 'self'` · `frame-ancestors 'none'`)
+- 비밀번호 비교는 상수 시간 (`safeEqual`)
+
+**아직 안 걸린 것 (중요한 순서대로):**
+
+1. **로그인 시도 제한이 없습니다.** 비밀번호가 짧으면 반복 시도로 뚫립니다.
+   Cloudflare 대시보드 → WAF → Rate limiting rule 하나면 됩니다
+   (`/api/*` 에서 같은 IP 의 401 이 10분에 5번을 넘으면 차단)
+2. **비밀번호가 `sessionStorage` 에 평문으로 남고 요청마다 머리로 나갑니다.**
+   로그인 때만 비밀번호를 받고 서명된 쿠키(HttpOnly · Secure · SameSite=Strict)를
+   내려 주는 쪽이 낫습니다
+3. **연락처가 `/api/data` 에 항상 실립니다.** 주간 표만 보는 기기에도 내려갑니다.
+   `학생 관리` 를 열 때만 따로 받게 가르면 줄어듭니다
+4. 더 단단히 하려면 **Cloudflare Access** 를 앞에 두면 공유 비밀번호 자체가 없어집니다
+
 ## 아직 안 한 것
 
-- **쓰기 요청 횟수 제한 없음** — 공유 비밀번호 하나로 막고 있습니다.
-  이 앱은 학생 연락처를 들고 있으니 Cloudflare Rate Limiting을 붙이는 게 좋습니다
+- **반복 수업이 묶여 있지 않습니다** — 12주 반복은 서로 모르는 12건이라 시간을
+  옮기려면 12번 열어야 합니다. `series_id` 와 묶음 등록 끝점이 있으면 한 번에 됩니다
+- **여러 명이 같이 쓸 때의 안전장치가 없습니다** — 나중에 저장한 사람이 말없이
+  이깁니다. `updated_at` 을 함께 보내 다르면 409 로 되물어야 합니다
+- **자동 새로고침이 없습니다** — Notion 이나 다른 창에서 고친 건 `새로고침` 을
+  눌러야 보입니다
 - **드래그로 수업 길이 정하기** — 지금은 클릭 → 기본 2시간, 그 뒤 종료 시각을 고칩니다
 - **반복 수업을 한꺼번에 옮기기** — 반복 등록은 되지만, 옮기거나 지울 땐 한 건씩입니다
 - **선생님별 PNG 일괄 저장** — 지금은 보고 있는 시간표 한 장씩입니다

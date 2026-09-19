@@ -50,7 +50,13 @@ export interface Env extends NotionEnv {
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow",
+      "referrer-policy": "no-referrer",
+    },
   });
 
 const bad = (message: string, status = 400) => json({ error: message }, status);
@@ -352,12 +358,44 @@ async function removeStudent(env: Env, id: string, force: boolean): Promise<Resp
 // Notion 페이지 ID는 하이픈이 있을 수도, 없을 수도 있다
 const ID_RE = "([0-9a-fA-F-]{32,36})";
 
+/**
+ * 자산 응답에 붙이는 머리.
+ *
+ * 이 주소는 공개 링크 하나로 열리고 학생 연락처를 다룬다. 검색에 잡히지 않게 하고,
+ * 다른 사이트가 틀(iframe)에 끼워 넣지 못하게 하고, 스크립트를 이 출처에서만
+ * 불러오게 한다. 인라인 스크립트를 /app.js · /png.js 로 뺀 덕에 script-src 에
+ * 'unsafe-inline' 을 두지 않아도 된다.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "x-robots-tag": "noindex, nofollow",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "content-security-policy": [
+    "default-src 'self'",
+    "img-src 'self' data: blob:",
+    "style-src 'self' 'unsafe-inline'",   // 블록 색을 style 속성으로 준다
+    "script-src 'self'",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+  ].join("; "),
+};
+
+function withSecurityHeaders(res: Response): Response {
+  const out = new Response(res.body, res);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) out.headers.set(name, value);
+  return out;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (!url.pathname.startsWith("/api/")) {
-      return env.ASSETS.fetch(request);
+      return withSecurityHeaders(await env.ASSETS.fetch(request));
     }
 
     const method = request.method;
