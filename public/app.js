@@ -635,28 +635,44 @@
   /**
    * 넘어가는 효과. 가던 쪽으로 밀려 나갔다가 반대쪽에서 들어온다.
    *
+   * 움직이는 것은 **날짜 칸과 그 머리뿐**이다. 시간축은 제자리에 있어야
+   * 눈금을 따라 읽던 자리를 잃지 않는다. 시간축은 z-index 30 에 흰 바탕이라
+   * 칸이 그 뒤로 미끄러져 들어간다.
+   *
    * 끝나면 transform 을 지운다 — 남겨 두면 그 요소가 위치 기준이 되어
    * 요일 머리의 sticky 가 흔들린다.
    */
+  function dayParts() {
+    return $("sheet").querySelectorAll(".head:not(.corner), .col");
+  }
+
+  function setStyle(list, css) {
+    Array.prototype.forEach.call(list, function (el) {
+      for (var k in css) el.style[k] = css[k];
+    });
+  }
+
   function slide(dir, move) {
-    var el = $("sheet");
     var out = dir > 0 ? -26 : 26;
 
-    el.style.transition = "transform .13s ease-in, opacity .13s ease-in";
-    el.style.transform = "translateX(" + out + "px)";
-    el.style.opacity = "0";
+    setStyle(dayParts(), {
+      transition: "transform .13s ease-in, opacity .13s ease-in",
+      transform: "translateX(" + out + "px)",
+      opacity: "0"
+    });
 
     setTimeout(function () {
-      move();
-      el.style.transition = "none";
-      el.style.transform = "translateX(" + -out + "px)";
-      void el.offsetWidth;                       // 여기서 한 번 끊어 줘야 되돌아오는 게 보인다
-      el.style.transition = "transform .16s ease-out, opacity .16s ease-out";
-      el.style.transform = "";
-      el.style.opacity = "1";
+      move();                       // 다시 그리면 칸이 통째로 새 것으로 바뀐다
+      var next = dayParts();
+      setStyle(next, { transition: "none", transform: "translateX(" + -out + "px)", opacity: "0" });
+      void $("sheet").offsetWidth;  // 여기서 한 번 끊어 줘야 되돌아오는 게 보인다
+      setStyle(next, {
+        transition: "transform .16s ease-out, opacity .16s ease-out",
+        transform: "",
+        opacity: "1"
+      });
       setTimeout(function () {
-        el.style.transition = "";
-        el.style.transform = "";
+        setStyle(dayParts(), { transition: "", transform: "", opacity: "" });
       }, 180);
     }, 130);
   }
