@@ -252,18 +252,37 @@
     render();
   });
 
+  /**
+   * 선생님 고르기. 넓으면 단추를 늘어놓고, 좁으면 고르는 칸 하나로 낸다 —
+   * 휴대폰에서 단추 다섯이면 두 줄을 먹고 그만큼 시간표가 아래로 밀린다.
+   */
   function renderTeacherPicker() {
+    if (state.narrow) {
+      $("teachers").innerHTML =
+        '<select data-teacher-select>' +
+        state.data.teachers.map(function (t) {
+          return '<option value="' + esc(t) + '"' + (t === state.teacher ? " selected" : "") +
+            ">" + esc(t) + " 선생님</option>";
+        }).join("") + "</select>";
+      return;
+    }
     $("teachers").innerHTML = state.data.teachers.map(function (t) {
       return '<button class="btn' + (t === state.teacher ? " is-active" : "") +
         '" type="button" data-teacher="' + esc(t) + '">' + esc(t) + " 선생님</button>";
     }).join("");
   }
-  $("teachers").addEventListener("click", function (e) {
-    var btn = e.target.closest("button[data-teacher]");
-    if (!btn) return;
-    state.teacher = btn.dataset.teacher;
+
+  function pickTeacher(name) {
+    state.teacher = name;
     renderTeacherPicker();
     render();
+  }
+  $("teachers").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-teacher]");
+    if (btn) pickTeacher(btn.dataset.teacher);
+  });
+  $("teachers").addEventListener("change", function (e) {
+    if (e.target.matches("select[data-teacher-select]")) pickTeacher(e.target.value);
   });
 
   // ── 그리기 ──────────────────────────────────────
@@ -636,7 +655,9 @@
   /* 화면 폭이 바뀌면(회전 등) 칸 수가 달라지므로 다시 그린다. */
   var onNarrowChange = function () {
     state.narrow = NARROW.matches;
-    if (state.data) render();
+    if (!state.data) return;
+    renderTeacherPicker();   // 단추 ↔ 고르는 칸
+    render();
   };
   if (NARROW.addEventListener) NARROW.addEventListener("change", onNarrowChange);
   else NARROW.addListener(onNarrowChange);

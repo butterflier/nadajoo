@@ -155,9 +155,30 @@
 
   .nav { display: flex; align-items: center; gap: 6px; }
   .nav .btn { padding: 7px 10px; }
-  .nav-label { font-size: 13px; font-weight: 500; color: var(--ink-soft); margin-left: 4px; }
+  .nav-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    margin-left: 4px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-  .picker { display: flex; gap: 6px; flex-wrap: wrap; }
+  .picker { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  /* 좁은 화면에서는 선생님을 단추 다섯이 아니라 고르는 칸 하나로 낸다 */
+  .picker select {
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: #FFFFFF;
+    border: var(--line-w) solid var(--line);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    max-width: 100%;
+  }
+  .picker select:focus { outline: none; border-color: var(--accent); }
 
   /* ── 격자 ─────────────────────────────────────── */
   .sheet {
@@ -456,12 +477,31 @@
     header.top { margin-bottom: 12px; }
     header.top h1 { font-size: 19px; }
 
+    /* 무엇도 화면 밖으로 나가지 않게. 잘려 나간 단추는 없는 단추다. */
+    html, body { overflow-x: hidden; }
+    .wrap, .toolbar, .picker, .nav, .sheet { max-width: 100%; min-width: 0; }
+
     .toolbar { gap: 6px; margin-bottom: 10px; }
-    .toolbar .spacer { display: none; }     /* 오른쪽으로 밀지 않고 줄바꿈으로 흐른다 */
-    .btn { padding: 11px 14px; font-size: 13.5px; min-height: 44px; }
+    .toolbar .spacer { display: none; }     /* 오른쪽으로 밀지 않는다 */
+    .btn { padding: 11px 13px; font-size: 13.5px; min-height: 44px; }
+
+    /* 탭과 동작 단추는 줄바꿈 대신 한 줄로 밀어 본다 — 세로를 아껴야 시간표가 보인다 */
+    .toolbar.scroll {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .toolbar.scroll::-webkit-scrollbar { display: none; }
+    .toolbar.scroll > * { flex: none; }
+    /* 탭이 먼저, 그다음 가장 자주 누르는 수업 등록, 나머지는 밀어서 본다 */
+    .toolbar.scroll #tabs { order: -2; flex-wrap: nowrap; }
+    #btn-new-lesson { order: -1; }
+
+    .picker select { width: 100%; min-height: 44px; font-size: 16px; }
     .nav { width: 100%; }
-    .nav .btn { padding: 11px 14px; }
-    .nav-label { margin-left: auto; font-size: 12.5px; }
+    .nav .btn { padding: 11px 13px; }
+    .nav-label { margin-left: auto; font-size: 12.5px; text-align: right; }
 
     /* 칸이 하나뿐이라 세로로 길게 쓴다 */
     .sheet { max-height: none; }
@@ -525,7 +565,7 @@
     <button class="close" type="button" id="banner-close">닫기</button>
   </div>
 
-  <div class="toolbar">
+  <div class="toolbar scroll">
     <div class="picker" id="tabs">
       <button class="btn is-active" type="button" data-view="teacher">선생님별</button>
       <button class="btn" type="button" data-view="date">날짜별</button>
