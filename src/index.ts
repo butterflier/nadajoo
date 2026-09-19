@@ -10,9 +10,13 @@
 import {
   KINDS,
   TEACHERS,
+  addDays,
   balanceOf,
   conflictMessage,
+  dayDiff,
   findConflicts,
+  isScope,
+  membersInScope,
   parseBlock,
   parseLesson,
   parseStudent,
@@ -23,6 +27,7 @@ import {
   type BlockInput,
   type Lesson,
   type LessonInput,
+  type Scope,
   type Student,
 } from "./model";
 import {
@@ -317,6 +322,116 @@ async function saveBlock(
   return json({ id });
 }
 
+/** 몸통에서 범위를 읽는다. 없거나 이상하면 "이것만". */
+const scopeOf = (body: Record<string, unknown>): Scope =>
+  isScope(body.scope) ? body.scope : "one";
+
+/**
+ * 묶음 전체를 한꺼번에 고친다.
+ *
+ * 날짜만 빼고 나머지 값은 그대로 덮어쓴다. 날짜는 **옮긴 만큼 다 같이 민다** —
+ * 12주짜리를 "이 날 이후 전부 하루 뒤로" 하면 뒤 주차가 나란히 하루씩 밀린다.
+ *
+ * 겹침은 한 건씩 되묻지 않고 한 번에 모아 알려 준다. 12주치를 열두 번 물어보면
+ * 아무도 안 읽는다.
+ */
+async function saveLessonSeries(
+  env: Env,
+  body: Record<string, unknown>,
+  target: Lesson,
+  scope: Scope,
+): Promise<Response> {
+  const { students, lessons, blocks } = await loadAll(env);
+
+  const parsed = parseLesson(body, students);
+  if (typeof parsed === "string") return bad(parsed);
+
+  const members = membersInScope(target, lessons, scope);
+  const shift = dayDiff(target.date, parsed.date);
+
+  const updates = members.map((m) => ({
+    id: m.id,
+    next: { ...parsed, date: addDays(m.date, shift), series_id: m.series_id } as LessonInput,
+  }));
+
+  // 자기 묶음끼리는 겹쳐도 겹침이 아니다 — 통째로 옮기는 중이기 때문이다
+  const mine = new Set(members.map((m) => m.id));
+  const others = lessons.filter((l) => !mine.has(l.id));
+
+  const clashes = updates
+    .filter((u) => {
+      const c = findConflicts(u.next, others, blocks);
+      return c.student || c.teacher || c.blocked;
+    })
+    .map((u) => u.next.date);
+
+  if (clashes.length && !acked(body, "series")) {
+    const shown = clashes.slice(0, 4).join(", ") + (clashes.length > 4 ? " 외" : "");
+    return json(
+      {
+        conflict: {
+          type: "series",
+          message:
+            members.length + "건 가운데 " + clashes.length + "건이 다른 일정과 겹칩니다 (" +
+            shown + "). 그래도 바꿀까요?",
+          count: clashes.length,
+        },
+      },
+      409,
+    );
+  }
+
+  for (const u of updates) await updateLesson(env, u.id, u.next);
+  dropCache();
+  return json({ changed: updates.length });
+}
+
+/** 묶음 단위 삭제. 확인은 화면에서 이미 받았다. */
+async function removeLessonSeries(
+  env: Env,
+  target: Lesson,
+  scope: Scope,
+): Promise<Response> {
+  const { lessons } = await loadAll(env);
+  const members = membersInScope(target, lessons, scope);
+  for (const m of members) await archiveLesson(env, m.id);
+  dropCache();
+  return json({ removed: members.length });
+}
+
+async function saveBlockSeries(
+  env: Env,
+  body: Record<string, unknown>,
+  target: Block,
+  scope: Scope,
+): Promise<Response> {
+  const { students, blocks } = await loadAll(env);
+
+  const parsed = parseBlock(body, students);
+  if (typeof parsed === "string") return bad(parsed);
+
+  const members = membersInScope(target, blocks, scope);
+  const shift = dayDiff(target.date, parsed.date);
+
+  for (const m of members) {
+    await updateBlock(env, m.id, {
+      ...parsed,
+      date: addDays(m.date, shift),
+      series_id: m.series_id,
+    } as BlockInput);
+  }
+  dropCache();
+  return json({ changed: members.length });
+}
+
+async function removeBlockSeries(env: Env, target: Block, scope: Scope): Promise<Response> {
+  const { blocks } = await loadAll(env);
+  const members = membersInScope(target, blocks, scope);
+  for (const m of members) await archiveBlock(env, m.id);
+  dropCache();
+  return json({ removed: members.length });
+}
+
 async function saveStudent(
   env: Env,
   body: Record<string, unknown>,
@@ -429,8 +544,18 @@ export default {
       }
       const block = url.pathname.match(new RegExp("^/api/blocks/" + ID_RE + "$"));
       if (block) {
-        if (method === "PUT") return await saveBlock(env, body ?? {}, block[1]);
+        const scope = scopeOf(body ?? {});
+        const target =
+          scope === "one" ? null : (await loadAll(env)).blocks.find((b) => b.id === block[1]);
+        if (scope !== "one" && !target) return bad("없는 수업불가입니다.", 404);
+
+        if (method === "PUT") {
+          return target
+            ? await saveBlockSeries(env, body ?? {}, target, scope)
+            : await saveBlock(env, body ?? {}, block[1]);
+        }
         if (method === "DELETE") {
+          if (target) return await removeBlockSeries(env, target, scope);
           await archiveBlock(env, block[1]);
           dropCache();
           return json({ ok: true });
@@ -444,8 +569,18 @@ export default {
       }
       const lesson = url.pathname.match(new RegExp("^/api/lessons/" + ID_RE + "$"));
       if (lesson) {
-        if (method === "PUT") return await saveLesson(env, body ?? {}, lesson[1]);
+        const scope = scopeOf(body ?? {});
+        const target =
+          scope === "one" ? null : (await loadAll(env)).lessons.find((l) => l.id === lesson[1]);
+        if (scope !== "one" && !target) return bad("없는 수업입니다.", 404);
+
+        if (method === "PUT") {
+          return target
+            ? await saveLessonSeries(env, body ?? {}, target, scope)
+            : await saveLesson(env, body ?? {}, lesson[1]);
+        }
         if (method === "DELETE") {
+          if (target) return await removeLessonSeries(env, target, scope);
           await archiveLesson(env, lesson[1]);
           dropCache();
           return json({ ok: true });

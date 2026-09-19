@@ -337,6 +337,21 @@
     padding: 18px;
   }
   .modal h2 { margin: 0 0 14px; font-size: 16px; font-weight: 700; }
+  .modal.narrow { max-width: 340px; }
+
+  /* 세로로 쌓는 선택지 — 범위 고르기처럼 셋 중 하나일 때 */
+  .stack { display: flex; flex-direction: column; gap: 6px; }
+  .stack .btn { text-align: left; padding: 10px 13px; }
+
+  /* 반복 묶음이라는 표시. 창 제목 바로 아래에 조용히 붙는다. */
+  .series-note {
+    margin: -6px 0 14px;
+    padding: 7px 10px;
+    border: var(--line-w) solid var(--line);
+    border-radius: var(--radius);
+    background: #F7F9FC;
+  }
+  .series-note[hidden] { display: none; }
 
   .field { margin-bottom: 12px; }
   .field label { display: block; font-size: 12px; font-weight: 500; color: var(--ink-soft); margin-bottom: 5px; }
@@ -432,6 +447,55 @@
 
   /* PNG는 화면 밖 캔버스에 그린다 */
   #png-canvas { display: none; }
+
+  /* ── 좁은 화면 ─────────────────────────────────
+     주간 뷰는 하루씩만 그린다(app.js 의 weekDays). 여기서는 손가락으로 쓸 수
+     있게 크기만 손본다 — 누르는 것은 최소 44px, 창은 화면을 꽉 채운다. */
+  @media (max-width: 640px) {
+    .wrap { padding: 14px 12px 40px; }
+    header.top { margin-bottom: 12px; }
+    header.top h1 { font-size: 19px; }
+
+    .toolbar { gap: 6px; margin-bottom: 10px; }
+    .toolbar .spacer { display: none; }     /* 오른쪽으로 밀지 않고 줄바꿈으로 흐른다 */
+    .btn { padding: 11px 14px; font-size: 13.5px; min-height: 44px; }
+    .nav { width: 100%; }
+    .nav .btn { padding: 11px 14px; }
+    .nav-label { margin-left: auto; font-size: 12.5px; }
+
+    /* 칸이 하나뿐이라 세로로 길게 쓴다 */
+    .sheet { max-height: none; }
+    .grid { min-width: 0; }
+    .head { padding: 11px 8px; }
+
+    /* 시간축을 줄여 수업 칸에 폭을 넘긴다 */
+    :root { --time-col: 46px; }
+    .tick { right: 5px; font-size: 10.5px; }
+
+    .lesson .when, .lesson .who { font-size: 11.5px; }
+    .lesson .t { font-size: 14px; }
+
+    /* 창은 화면을 꽉 채운다 — 작은 화면에서 떠 있는 상자는 답답하다 */
+    .scrim { padding: 0; align-items: stretch; }
+    .modal {
+      max-width: none;
+      min-height: 100%;
+      border: none;
+      border-radius: 0;
+      padding: 18px 16px 28px;
+    }
+    .modal.narrow { max-width: none; }
+    .row { flex-wrap: wrap; }
+    .row > .field { flex: 1 1 140px; }
+    .field input, .field select, .field textarea { font-size: 16px; min-height: 44px; }
+    .field textarea { min-height: 76px; }
+    label.check { padding: 11px 10px; min-height: 44px; }
+    .picklist { max-height: 210px; }
+    .modal-actions { position: sticky; bottom: 0; background: #FFFFFF; padding-top: 12px; }
+
+    /* 학생 관리 표는 가로로 민다 */
+    .table { min-width: 560px; }
+  }
 </style>
 </head>
 <body>
@@ -518,6 +582,7 @@
 <div class="scrim" id="scrim-lesson" hidden>
   <form class="modal" id="form-lesson">
     <h2 id="lesson-title">수업 등록</h2>
+    <p class="hint series-note" id="lesson-series" hidden></p>
 
     <div class="row">
       <div class="field">
@@ -590,9 +655,26 @@
   </form>
 </div>
 
+<div class="scrim" id="scrim-scope" hidden>
+  <div class="modal narrow">
+    <h2 id="scope-title">반복 수업</h2>
+    <p class="hint" id="scope-text" style="margin-top: 0;"></p>
+    <div class="stack">
+      <button class="btn" type="button" data-scope="one">이 수업만</button>
+      <button class="btn" type="button" data-scope="after">이 날 이후 전부</button>
+      <button class="btn" type="button" data-scope="all">묶음 전부</button>
+    </div>
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn" type="button" id="scope-cancel">취소</button>
+    </div>
+  </div>
+</div>
+
 <div class="scrim" id="scrim-block" hidden>
   <form class="modal" id="form-block">
     <h2 id="block-title">수업불가 추가</h2>
+    <p class="hint series-note" id="block-series" hidden></p>
     <p class="hint" style="margin-top: 0;">정규수업·휴가·연휴처럼 개인수업을 넣을 수 없는 시간입니다. 학생이 없으니 잔여 시간은 깎이지 않습니다.</p>
 
     <div class="row">

@@ -43,6 +43,7 @@ const L = {
   kind: "수업종류",
   content: "수업내용",
   online: "온라인",
+  series: "묶음",
   date: "날짜",
   start: "시작",
   end: "종료",
@@ -55,6 +56,7 @@ const B = {
   teacher: "선생님",
   student: "학생",
   studentName: "학생명",
+  series: "묶음",
   date: "날짜",
   start: "시작",
   end: "종료",
@@ -288,6 +290,7 @@ function toLesson(page: any, studentsById: Map<string, Student>): Lesson | null 
     content: readText(props[L.content]),
     online: readCheckbox(props[L.online]),
     memo: readText(props[L.memo]),
+    series_id: readText(props[L.series]),
   };
 }
 
@@ -310,6 +313,7 @@ function lessonProperties(lesson: LessonInput) {
     [L.kind]: { select: { name: lesson.kind } },
     [L.content]: writeText(lesson.content),
     [L.online]: { checkbox: lesson.online },
+    [L.series]: writeText(lesson.series_id),
     [L.date]: { date: { start: lesson.date } },
     [L.start]: writeText(toTimeLabel(lesson.start_min)),
     [L.end]: writeText(toTimeLabel(lesson.end_min)),
@@ -393,6 +397,7 @@ function toBlock(page: any): Block | null {
     start_min: startMin,
     end_min: endMin,
     memo: readText(props[B.memo]),
+    series_id: readText(props[B.series]),
   };
 }
 
@@ -406,6 +411,7 @@ function blockProperties(block: BlockInput) {
     [B.start]: writeText(toTimeLabel(block.start_min)),
     [B.end]: writeText(toTimeLabel(block.end_min)),
     [B.memo]: writeText(block.memo),
+    [B.series]: writeText(block.series_id),
   };
 }
 

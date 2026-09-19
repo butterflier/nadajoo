@@ -52,6 +52,11 @@ export interface Lesson {
   content: string | null; // 무슨 수업인지 한 줄 — 블록 아래칸에 그대로 나온다
   online: boolean;        // 온라인 수업이면 블록의 학생 이름 왼쪽에 표시가 붙는다
   memo: string | null;
+  /**
+   * 반복으로 한꺼번에 만든 수업들이 나눠 갖는 값. 같은 값이면 한 묶음이다.
+   * 이게 있어야 "이 날 이후 전부 30분 미루기" 같은 걸 한 번에 할 수 있다.
+   */
+  series_id: string | null;
 }
 
 /**
@@ -73,10 +78,39 @@ export interface Block {
   start_min: number;
   end_min: number;
   memo: string | null;
+  series_id: string | null;  // 수업과 같은 규칙
 }
 
 /** 이 수업불가가 누구에게도 안 걸리는 게 아니라, 모두에게 걸리는 것인지. */
 export const isGlobalBlock = (b: Block) => b.teacher === null && !b.student_ids.length;
+
+/** 반복으로 한꺼번에 만들 때 나눠 가질 값. 사람이 읽을 일은 없다. */
+export function newSeriesId(): string {
+  return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+/** 수정·삭제를 어디까지 미칠 것인가. */
+export type Scope = "one" | "after" | "all";
+
+export const isScope = (v: unknown): v is Scope =>
+  v === "one" || v === "after" || v === "all";
+
+/**
+ * 묶음에서 이 범위에 드는 것들. 묶음이 없으면 자기 자신뿐이다.
+ *
+ * `after` 는 날짜 기준이다 — 같은 날 여러 건이면 그 날 것도 모두 든다.
+ */
+export function membersInScope<T extends { id: string; date: string; series_id: string | null }>(
+  target: T,
+  all: T[],
+  scope: Scope,
+): T[] {
+  if (scope === "one" || !target.series_id) return [target];
+  const family = all.filter((x) => x.series_id === target.series_id);
+  const picked = scope === "all" ? family : family.filter((x) => x.date >= target.date);
+  // 대상이 빠지는 일은 없어야 한다
+  return picked.some((x) => x.id === target.id) ? picked : [target, ...picked];
+}
 
 /** 저장 직전의 값 — 아직 ID가 없다. */
 export type StudentInput = Omit<Student, "id">;
@@ -135,6 +169,14 @@ export const toDateLabel = (d: Date) => d.toISOString().slice(0, 10);
 
 /** 월=0 … 일=6. JS의 일=0과 다르다. */
 export const dowOf = (d: Date): number => (d.getUTCDay() + 6) % 7;
+
+/** 두 날짜의 일수 차이. to - from. */
+export function dayDiff(from: string, to: string): number {
+  const a = parseDate(from);
+  const b = parseDate(to);
+  if (!a || !b) return 0;
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
 
 export function addDays(label: string, days: number): string {
   const d = parseDate(label);
@@ -304,6 +346,7 @@ export function parseLesson(
     content: text(body.content),
     online: body.online === true,
     memo: text(body.memo),
+    series_id: text(body.series_id),
   };
 }
 
@@ -346,6 +389,7 @@ export function parseBlock(
     start_min: start,
     end_min: end,
     memo: text(body.memo),
+    series_id: text(body.series_id),
   };
 }
 

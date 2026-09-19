@@ -10,6 +10,10 @@
   var DOW_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
   var PW_KEY = "nadajoo-pw";
 
+  /* 좁은 화면에서는 주간 뷰가 하루씩만 보인다. 일곱 칸을 휴대폰에 밀어 넣으면
+     한 칸이 50px 도 안 돼서 읽히지도, 눌리지도 않는다. */
+  var NARROW = window.matchMedia("(max-width: 640px)");
+
   /* 수업종류별 색. 블록만 보고 종류를 알아볼 수 있게 한다. */
   var KIND_COLOR = {
     "본고사": { bg: "#EDF3FE", line: "#BBD0F7", ink: "#1B3F8F" },
@@ -134,6 +138,7 @@
     password: "",
     view: "teacher",
     teacher: null,
+    narrow: NARROW.matches,
     student: null,        // 학생별 뷰에서 보고 있는 학생 id
     pickedStudents: [],   // 수업 등록 창에서 고른 학생들
     pickedBlockStudents: [],
@@ -273,15 +278,17 @@
     $("meta").textContent = "오늘 " + today + " · 학생 " + state.data.students.length + "명";
 
     if (state.view === "teacher") {
-      $("wk-label").textContent = state.weekStart + " ~ " + addDays(state.weekStart, 6);
+      $("wk-label").textContent = rangeLabel();
       renderGrid(teacherColumns(), function (l) {
         return l.teacher === state.teacher ? l.date : null;
       });
-      $("hint").textContent = "빈 칸을 누르면 그 시각으로 등록 창이 열립니다 (30분 단위, 기본 " +
-        DEFAULT_DURATION_MIN / 60 + "시간). 블록을 누르면 수정 창입니다.";
+      $("hint").textContent = state.narrow
+        ? "좌우로 밀면 날짜가 넘어갑니다. 빈 칸을 누르면 그 시각으로 등록 창이 열립니다."
+        : "빈 칸을 누르면 그 시각으로 등록 창이 열립니다 (30분 단위, 기본 " +
+          DEFAULT_DURATION_MIN / 60 + "시간). 블록을 누르면 수정 창입니다.";
     } else if (state.view === "student") {
       renderStudentPicker();
-      $("sw-label").textContent = state.weekStart + " ~ " + addDays(state.weekStart, 6);
+      $("sw-label").textContent = rangeLabel();
       var me = studentById(state.student);
       if (!me) {
         $("sheet").innerHTML = '<div class="empty">학생을 먼저 등록해 주세요.</div>';
@@ -295,7 +302,9 @@
           return l.student_ids.indexOf(state.student) >= 0 ? l.date : null;
         });
       }
-      $("hint").textContent = "그 학생의 한 주입니다. 선생님이 달라도 다 보입니다. 빈 칸을 누르면 그 학생으로 등록 창이 열립니다.";
+      $("hint").textContent = state.narrow
+        ? "좌우로 밀면 날짜가 넘어갑니다. 선생님이 달라도 그 학생 수업은 다 보입니다."
+        : "그 학생의 한 주입니다. 선생님이 달라도 다 보입니다. 빈 칸을 누르면 그 학생으로 등록 창이 열립니다.";
     } else if (state.view === "date") {
       var d = parseDate(state.day);
       $("dy-label").textContent = state.day + " (" + DOW_LABELS[dowOf(d)] + ")";
@@ -310,15 +319,28 @@
   }
 
   /** 선생님별 주간뷰 — 월~일 7칸. */
+  /**
+   * 주간 뷰가 그릴 날짜들.
+   * 넓으면 월~일 이레, 좁으면 보고 있는 하루뿐이다.
+   */
+  function weekDays() {
+    if (state.narrow) return [state.day];
+    var out = [];
+    for (var i = 0; i < 7; i++) out.push(addDays(state.weekStart, i));
+    return out;
+  }
+
   function teacherColumns() {
     var cols = [];
-    for (var i = 0; i < 7; i++) {
-      var label = addDays(state.weekStart, i);
+    var days = weekDays();
+    for (var i = 0; i < days.length; i++) {
+      var label = days[i];
+      var dow = dowOf(parseDate(label));
       cols.push({
         key: label,
-        title: DOW_LABELS[i],
+        title: DOW_LABELS[dow],
         sub: mmdd(label),
-        weekend: i >= 5,
+        weekend: dow >= 5,
         today: label === state.data.today,
         date: label,
         teacher: state.teacher
@@ -329,21 +351,19 @@
 
   /** 학생별 주간뷰 — 월~일 7칸. 선생님을 가리지 않는다. */
   function studentColumns() {
-    var cols = [];
-    for (var i = 0; i < 7; i++) {
-      var label = addDays(state.weekStart, i);
-      cols.push({
+    return weekDays().map(function (label) {
+      var dow = dowOf(parseDate(label));
+      return {
         key: label,
-        title: DOW_LABELS[i],
+        title: DOW_LABELS[dow],
         sub: mmdd(label),
-        weekend: i >= 5,
+        weekend: dow >= 5,
         today: label === state.data.today,
         date: label,
         teacher: null,          // 빈 칸을 누르면 선생님은 등록 창에서 고른다
         student: state.student
-      });
-    }
-    return cols;
+      };
+    });
   }
 
   function renderStudentPicker() {
@@ -385,6 +405,12 @@
     if (teacher && b.teacher === teacher) return true;
     if (student && b.student_ids.indexOf(student) >= 0) return true;
     return false;
+  }
+
+  /** 지금 보고 있는 범위를 글로. 좁은 화면은 하루뿐이라 날짜와 요일을 적는다. */
+  function rangeLabel() {
+    if (!state.narrow) return state.weekStart + " ~ " + addDays(state.weekStart, 6);
+    return state.day + " (" + DOW_LABELS[dowOf(parseDate(state.day))] + ")";
   }
 
   var HOURS = (DAY_END_MIN - DAY_START_MIN) / 60;
@@ -436,8 +462,10 @@
       if (key !== null && byCol[key]) byCol[key].push(l);
     });
 
+    // 칸이 하나면 최소폭을 걸지 않는다 — 걸면 좁은 화면에서 가로로 밀린다
+    var minW = state.narrow && cols.length === 1 ? 0 : (cols.length > 5 ? 112 : 176);
     var html = '<div class="grid" style="grid-template-columns: var(--time-col) repeat(' +
-      cols.length + ', minmax(' + (cols.length > 5 ? 112 : 176) + 'px, 1fr));">';
+      cols.length + ", minmax(" + minW + 'px, 1fr));">';
 
     html += '<div class="head corner"></div>';
     cols.forEach(function (c) {
@@ -491,6 +519,7 @@
           " background:" + color.bg + "; border-color:" + color.line + "; color:" + color.ink + ';"' +
           ' title="' + esc(l.student_names.join(", ") + " · " + l.teacher + " " + l.kind +
             (l.online ? " · 온라인" : "") +
+            (l.series_id ? " · 반복" : "") +
             (l.content ? " · " + l.content : "") +
             (l.memo ? " · " + l.memo : "")) + '">' +
           '<span class="when">[' + esc(l.kind) + "] " +
@@ -546,15 +575,71 @@
   });
 
   // ── 주/일 이동 ──────────────────────────────────
-  $("wk-prev").addEventListener("click", function () { state.weekStart = addDays(state.weekStart, -7); render(); });
-  $("wk-next").addEventListener("click", function () { state.weekStart = addDays(state.weekStart, 7); render(); });
-  $("wk-today").addEventListener("click", function () { state.weekStart = weekStartOf(state.data.today); render(); });
-  $("dy-prev").addEventListener("click", function () { state.day = addDays(state.day, -1); render(); });
-  $("dy-next").addEventListener("click", function () { state.day = addDays(state.day, 1); render(); });
-  $("dy-today").addEventListener("click", function () { state.day = state.data.today; render(); });
-  $("sw-prev").addEventListener("click", function () { state.weekStart = addDays(state.weekStart, -7); render(); });
-  $("sw-next").addEventListener("click", function () { state.weekStart = addDays(state.weekStart, 7); render(); });
-  $("sw-today").addEventListener("click", function () { state.weekStart = weekStartOf(state.data.today); render(); });
+  /**
+   * 앞뒤로 넘기기. 좁은 화면의 주간 뷰는 하루씩, 넓으면 한 주씩 움직인다.
+   * 날짜별 뷰는 언제나 하루씩이다.
+   */
+  function step(dir) {
+    if (state.view === "date" || state.narrow) {
+      state.day = addDays(state.day, dir);
+      state.weekStart = weekStartOf(state.day);   // 넓은 화면으로 돌아가도 그 주가 보이게
+    } else {
+      state.weekStart = addDays(state.weekStart, dir * 7);
+    }
+    render();
+  }
+
+  function goToday() {
+    state.day = state.data.today;
+    state.weekStart = weekStartOf(state.data.today);
+    render();
+  }
+
+  ["wk", "sw", "dy"].forEach(function (p) {
+    $(p + "-prev").addEventListener("click", function () { step(-1); });
+    $(p + "-next").addEventListener("click", function () { step(1); });
+    $(p + "-today").addEventListener("click", goToday);
+  });
+
+  /*
+   * 좌우로 밀어서 날짜 넘기기.
+   *
+   * 가로로 스크롤되는 화면(날짜별 뷰의 선생님 칸들)에서는 밀기가 스크롤과
+   * 부딪히므로 걸지 않는다. 하루만 보이는 주간 뷰에서만 받는다.
+   */
+  (function bindSwipe() {
+    var x0 = null, y0 = null, sheet = $("sheet");
+
+    var canSwipe = function () {
+      return state.narrow && state.view !== "students" &&
+        sheet.scrollWidth <= sheet.clientWidth + 2;
+    };
+
+    sheet.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1 || !canSwipe()) { x0 = null; return; }
+      x0 = e.touches[0].clientX;
+      y0 = e.touches[0].clientY;
+    }, { passive: true });
+
+    sheet.addEventListener("touchend", function (e) {
+      if (x0 === null) return;
+      var t = e.changedTouches[0];
+      var dx = t.clientX - x0;
+      var dy = t.clientY - y0;
+      x0 = null;
+      // 가로로 충분히, 그리고 세로보다 확실히 많이 움직였을 때만
+      if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+      step(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  })();
+
+  /* 화면 폭이 바뀌면(회전 등) 칸 수가 달라지므로 다시 그린다. */
+  var onNarrowChange = function () {
+    state.narrow = NARROW.matches;
+    if (state.data) render();
+  };
+  if (NARROW.addEventListener) NARROW.addEventListener("change", onNarrowChange);
+  else NARROW.addListener(onNarrowChange);
   $("pick-student").addEventListener("change", function () { state.student = this.value; render(); });
   $("btn-refresh").addEventListener("click", function () { load(); });
 
@@ -688,6 +773,13 @@
     $("f-repeat").closest(".field").hidden = !!lesson;   // 수정할 때는 반복이 의미가 없다
     $("btn-delete").hidden = !lesson;
     $("lesson-msg").textContent = "";
+    var n = seriesCount(lesson, state.data.lessons);
+    $("lesson-series").hidden = n < 2;
+    if (n >= 2) {
+      $("lesson-series").textContent =
+        n + "주 반복 묶음의 하나입니다. 저장하거나 지울 때 어디까지 미칠지 묻습니다.";
+    }
+
     state.lessonSnapshot = snapshotLesson();
     $("scrim-lesson").hidden = false;
     $("f-student-filter").focus();
@@ -777,6 +869,43 @@
   }
 
   /**
+   * 반복 묶음에서 어디까지 미칠지 묻는다. 셋 중 하나를 고르거나 취소.
+   *
+   * confirm() 은 둘 중 하나뿐이라 쓸 수 없어서 작은 창을 따로 둔다.
+   * 묶음이 아니면 물어보지 않고 바로 "이것만" 으로 친다.
+   */
+  function askScope(what, count) {
+    return new Promise(function (resolve) {
+      $("scope-title").textContent = what + " — 반복 묶음";
+      $("scope-text").textContent =
+        "이 " + what + "은 " + count + "건짜리 반복 묶음의 하나입니다. 어디까지 할까요?";
+
+      function done(value) {
+        $("scrim-scope").hidden = true;
+        $("scrim-scope").removeEventListener("click", onClick);
+        document.removeEventListener("keydown", onKey);
+        resolve(value);
+      }
+      function onClick(e) {
+        var pick = e.target.closest("button[data-scope]");
+        if (pick) return done(pick.dataset.scope);
+        if (e.target === $("scope-cancel") || e.target === $("scrim-scope")) done(null);
+      }
+      function onKey(e) { if (e.key === "Escape") done(null); }
+
+      $("scrim-scope").addEventListener("click", onClick);
+      document.addEventListener("keydown", onKey);
+      $("scrim-scope").hidden = false;
+    });
+  }
+
+  /** 같은 묶음에 몇 건이 있는가. 묶음이 아니면 0. */
+  function seriesCount(item, list) {
+    if (!item || !item.series_id) return 0;
+    return list.filter(function (x) { return x.series_id === item.series_id; }).length;
+  }
+
+  /**
    * 같은 것을 주 단위로 여러 건 넣는다.
    *
    * 중간에 실패하면 거기서 멈추되, 몇 건이 들어갔고 어디서 멈췄는지 돌려준다.
@@ -785,8 +914,12 @@
    */
   async function saveWeeks(path, base, weeks) {
     var out = { saved: 0, skipped: 0, failedAt: null, error: "" };
+    // 두 건 이상이면 한 묶음으로 엮는다. 나중에 한꺼번에 옮기고 지울 수 있다.
+    var series = weeks > 1
+      ? "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+      : null;
     for (var i = 0; i < weeks; i++) {
-      var one = Object.assign({}, base, { date: addDays(base.date, i * 7) });
+      var one = Object.assign({}, base, { date: addDays(base.date, i * 7), series_id: series });
       try {
         var r = await saveOne(path, "POST", one);
         if (r.skipped) out.skipped++;
@@ -818,11 +951,21 @@
     try {
       // 잔여 부족·겹침은 saveOne 이 저장 전에 물어본다. 여기서는 결과만 센다.
       if (state.editingLesson) {
-        var res = await saveOne("/api/lessons/" + state.editingLesson.id, "PUT", collected);
+        var n = seriesCount(state.editingLesson, state.data.lessons);
+        var scope = "one";
+        if (n > 1) {
+          scope = await askScope("수업", n);
+          if (!scope) return;                 // 취소 — 창은 그대로 둔다
+        }
+        var res = await saveOne(
+          "/api/lessons/" + state.editingLesson.id, "PUT",
+          Object.assign({}, collected, { scope: scope }),
+        );
         // 취소했으면 창을 닫지 않는다 — 고치던 내용이 사라지면 안 된다
         if (res.skipped) { $("lesson-msg").textContent = "저장하지 않았습니다."; return; }
         closeLesson();
         await load();
+        if (res.changed > 1) banner(res.changed + "건을 함께 바꿨습니다.");
         return;
       }
 
@@ -841,13 +984,25 @@
   $("btn-delete").addEventListener("click", async function () {
     var lesson = state.editingLesson;
     if (!lesson) return;
-    if (!confirm(lesson.student_names.join(", ") + " 학생의 " + lesson.date + " " +
-      toTimeLabel(lesson.start_min) + " 수업을 삭제할까요?")) return;
+
+    var n = seriesCount(lesson, state.data.lessons);
+    var scope = "one";
+    if (n > 1) {
+      scope = await askScope("수업", n);
+      if (!scope) return;
+    }
+    var what = scope === "one"
+      ? lesson.student_names.join(", ") + " 학생의 " + lesson.date + " " +
+        toTimeLabel(lesson.start_min) + " 수업을"
+      : "묶음에서 " + (scope === "all" ? "전부를" : lesson.date + " 이후를");
+    if (!confirm(what + " 삭제할까요?")) return;
+
     $("btn-delete").disabled = true;
     try {
-      await api("/api/lessons/" + lesson.id, "DELETE", {});
+      var res = await api("/api/lessons/" + lesson.id, "DELETE", { scope: scope });
       closeLesson();
       await load();
+      if (res.removed > 1) banner(res.removed + "건을 삭제했습니다.");
     } catch (err) {
       $("lesson-msg").textContent = err.message;
     } finally {
@@ -891,6 +1046,13 @@
     $("b-repeat-field").hidden = !!block;   // 수정할 때는 반복이 의미가 없다
     $("b-delete").hidden = !block;
     $("block-msg").textContent = "";
+    var bn = seriesCount(block, state.data.blocks);
+    $("block-series").hidden = bn < 2;
+    if (bn >= 2) {
+      $("block-series").textContent =
+        bn + "주 반복 묶음의 하나입니다. 저장하거나 지울 때 어디까지 미칠지 묻습니다.";
+    }
+
     state.blockSnapshot = snapshotBlock();
     $("scrim-block").hidden = false;
     $("b-title").focus();
@@ -951,10 +1113,20 @@
     $("b-save").disabled = true;
     try {
       if (state.editingBlock) {
-        var res = await saveOne("/api/blocks/" + state.editingBlock.id, "PUT", collected);
+        var n = seriesCount(state.editingBlock, state.data.blocks);
+        var scope = "one";
+        if (n > 1) {
+          scope = await askScope("수업불가", n);
+          if (!scope) return;
+        }
+        var res = await saveOne(
+          "/api/blocks/" + state.editingBlock.id, "PUT",
+          Object.assign({}, collected, { scope: scope }),
+        );
         if (res.skipped) { $("block-msg").textContent = "저장하지 않았습니다."; return; }
         closeBlock();
         await load();
+        if (res.changed > 1) banner(res.changed + "건을 함께 바꿨습니다.");
         return;
       }
 
@@ -973,12 +1145,24 @@
   $("b-delete").addEventListener("click", async function () {
     var block = state.editingBlock;
     if (!block) return;
-    if (!confirm(block.date + " " + block.title + " 을(를) 삭제할까요?")) return;
+
+    var n = seriesCount(block, state.data.blocks);
+    var scope = "one";
+    if (n > 1) {
+      scope = await askScope("수업불가", n);
+      if (!scope) return;
+    }
+    var what = scope === "one"
+      ? block.date + " " + block.title + " 을(를)"
+      : block.title + " 묶음에서 " + (scope === "all" ? "전부를" : block.date + " 이후를");
+    if (!confirm(what + " 삭제할까요?")) return;
+
     $("b-delete").disabled = true;
     try {
-      await api("/api/blocks/" + block.id, "DELETE", {});
+      var res = await api("/api/blocks/" + block.id, "DELETE", { scope: scope });
       closeBlock();
       await load();
+      if (res.removed > 1) banner(res.removed + "건을 삭제했습니다.");
     } catch (err) {
       $("block-msg").textContent = err.message;
     } finally {
@@ -1104,6 +1288,7 @@
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
     // 닫기 단추·바깥 누름·Esc 가 모두 같은 길을 탄다
+    if (!$("scrim-scope").hidden) return;   // 범위 창은 스스로 Esc 를 받는다
     if (!$("scrim-lesson").hidden) askCloseLesson();
     else if (!$("scrim-student").hidden) askCloseStudent();
     else if (!$("scrim-block").hidden) askCloseBlock();
