@@ -433,6 +433,12 @@
   }
 
   var HOURS = (DAY_END_MIN - DAY_START_MIN) / 60;
+
+  /**
+   * 한 시간의 높이. CSS 의 --hour 와 **같아야 한다** — 배경의 눈금선은 CSS 가,
+   * 격자 전체 높이는 여기가 정하므로 어긋나면 선과 블록이 따로 논다.
+   */
+  var hourPx = function () { return state.narrow ? 46 : 54; };
   var topPct = function (min) { return ((min - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100; };
 
   /**
@@ -493,7 +499,7 @@
     });
 
     // 시간축
-    html += '<div class="timecol" style="position: sticky; height:' + HOURS * 54 + 'px;">';
+    html += '<div class="timecol" style="position: sticky; height:' + HOURS * hourPx() + 'px;">';
     for (var h = 0; h <= HOURS; h++) {
       var min = DAY_START_MIN + h * 60;
       html += '<span class="tick" style="top:' + (h / HOURS) * 100 + '%;">' +
@@ -505,7 +511,7 @@
 
     cols.forEach(function (c) {
       html += '<div class="col' + (c.weekend ? " weekend" : "") +
-        '" data-col="' + esc(c.key) + '" style="height:' + HOURS * 54 + 'px;">';
+        '" data-col="' + esc(c.key) + '" style="height:' + HOURS * hourPx() + 'px;">';
 
       // 수업불가를 먼저, 칸 전체 폭에 깐다 — 수업과 자리를 나눠 갖지 않는다
       blocks.forEach(function (b) {

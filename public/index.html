@@ -473,9 +473,16 @@
      주간 뷰는 하루씩만 그린다(app.js 의 weekDays). 여기서는 손가락으로 쓸 수
      있게 크기만 손본다 — 누르는 것은 최소 44px, 창은 화면을 꽉 채운다. */
   @media (max-width: 640px) {
-    .wrap { padding: 14px 12px 40px; }
-    header.top { margin-bottom: 12px; }
-    header.top h1 { font-size: 19px; }
+    /* 가장자리에 붙지 않게 폭을 90%로 두고 가운데에 놓는다 */
+    .wrap { width: 90%; max-width: none; margin: 0 auto; padding: 10px 0 28px; }
+
+    /* 제목 줄을 한 줄로 눕히고 낮춘다 */
+    header.top { margin-bottom: 8px; gap: 4px 8px; align-items: baseline; }
+    header.top h1 { font-size: 17px; }
+    .meta { font-size: 11.5px; }
+
+    /* 화면 아래 안내는 감춘다 — 좁은 화면에서 두 줄을 먹는다 */
+    .hint { display: none; }
 
     /* 무엇도 화면 밖으로 나가지 않게. 잘려 나간 단추는 없는 단추다. */
     html, body { overflow-x: hidden; }
@@ -498,18 +505,23 @@
     .toolbar.scroll #tabs { order: -2; flex-wrap: nowrap; }
     #btn-new-lesson { order: -1; }
 
+    /* 선생님 고르기와 앞뒤 이동을 한 줄에 나눠 놓는다 */
+    .picker { flex: 1 1 120px; }
     .picker select { width: 100%; min-height: 44px; font-size: 16px; }
-    .nav { width: 100%; }
-    .nav .btn { padding: 11px 13px; }
-    .nav-label { margin-left: auto; font-size: 12.5px; text-align: right; }
+    .nav { flex: none; gap: 4px; }
+    .nav .btn { padding: 11px 12px; }
+    /* 날짜는 격자 머리에 이미 있다. 여기서 또 적으면 한 줄을 헛되이 먹는다. */
+    .nav-label { display: none; }
 
-    /* 칸이 하나뿐이라 세로로 길게 쓴다 */
-    .sheet { max-height: none; }
+    /* 칸이 하나뿐이라 안에서 스크롤하지 않고 화면이 통째로 흐른다.
+       그래야 요일 머리가 화면 맨 위에 붙어 따라온다(sticky 가 화면 기준이 된다). */
+    .sheet { max-height: none; overflow: visible; }
     .grid { min-width: 0; }
-    .head { padding: 11px 8px; }
+    .head { padding: 8px 8px; font-size: 12.5px; }
+    .head .sub { margin-top: 1px; }
 
-    /* 시간축을 줄여 수업 칸에 폭을 넘긴다 */
-    :root { --time-col: 46px; }
+    /* 시간축을 줄여 수업 칸에 폭을 넘기고, 한 시간의 높이도 낮춘다 */
+    :root { --time-col: 42px; --hour: 46px; }
     .tick { right: 5px; font-size: 10.5px; }
 
     .lesson .when, .lesson .who { font-size: 11.5px; }
