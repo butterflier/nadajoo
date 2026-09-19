@@ -188,6 +188,7 @@ function toStudent(page: any): Student | null {
 
   return {
     id: page.id,
+    updated_at: String(page.last_edited_time ?? ""),
     name,
     contact: readText(props[S.contact]),
     // 총 시간은 Notion에 '시간' 단위 숫자로 들어 있다 (1.5 = 1시간 30분)
@@ -280,6 +281,7 @@ function toLesson(page: any, studentsById: Map<string, Student>): Lesson | null 
 
   return {
     id: page.id,
+    updated_at: String(page.last_edited_time ?? ""),
     teacher,
     student_ids: studentIds,
     student_names: names,
@@ -389,6 +391,7 @@ function toBlock(page: any): Block | null {
 
   return {
     id: page.id,
+    updated_at: String(page.last_edited_time ?? ""),
     teacher,
     student_ids: studentIds,
     student_names: studentNames,

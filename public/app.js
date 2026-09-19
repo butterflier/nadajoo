@@ -145,6 +145,7 @@
     view: "teacher",
     teacher: null,
     narrow: NARROW.matches,
+    signature: "",        // 자료가 바뀌었는지 보는 지문
     student: null,        // 학생별 뷰에서 보고 있는 학생 id
     pickedStudents: [],   // 수업 등록 창에서 고른 학생들
     pickedBlockStudents: [],
@@ -227,17 +228,58 @@
   }
   $("banner-close").addEventListener("click", function () { $("banner").hidden = true; });
 
+  /**
+   * 지금 들고 있는 자료의 지문. 이게 그대로면 다시 그리지 않는다 —
+   * 60초마다 화면을 새로 그리면 보고 있던 자리와 스크롤이 튄다.
+   */
+  function fingerprint(data) {
+    var parts = [data.today];
+    (data.students || []).forEach(function (x) { parts.push(x.id, x.updated_at); });
+    (data.lessons || []).forEach(function (x) { parts.push(x.id, x.updated_at); });
+    (data.blocks || []).forEach(function (x) { parts.push(x.id, x.updated_at); });
+    return parts.join("|");
+  }
+
+  /** 창이 열려 있거나 무언가 고치는 중이면 조용히 넘어간다. */
+  function busyNow() {
+    return !$("scrim-lesson").hidden || !$("scrim-block").hidden ||
+      !$("scrim-student").hidden || !$("scrim-scope").hidden;
+  }
+
+  /**
+   * 다른 곳(Notion·다른 창)에서 고친 것을 따라잡는다.
+   *
+   * 화면이 보일 때와 60초마다 한 번씩 읽어 보고, **바뀐 게 있을 때만** 그린다.
+   * 무언가 고치는 중이면 건너뛴다 — 쓰던 내용이 날아가면 안 된다.
+   */
+  async function refreshIfChanged() {
+    if (!state.password || document.hidden || busyNow()) return;
+    try {
+      var next = await api("/api/data");
+      if (fingerprint(next) === state.signature) return;
+      state.data = next;
+      state.signature = fingerprint(next);
+      afterLoad();
+      banner("다른 곳에서 고친 내용을 받아 왔습니다.");
+    } catch (e) { /* 잠깐 안 되는 것은 다음 차례에 다시 해 본다 */ }
+  }
+
   async function load() {
     try {
       state.data = await api("/api/data");
-      if (!state.teacher) state.teacher = state.data.teachers[0];
-      if (!state.weekStart) state.weekStart = weekStartOf(state.data.today);
-      if (!state.day) state.day = state.data.today;
-      renderTeacherPicker();
-      render();
+      state.signature = fingerprint(state.data);
+      afterLoad();
     } catch (err) {
       $("sheet").innerHTML = '<div class="empty">' + esc(err.message) + "</div>";
     }
+  }
+
+  function afterLoad() {
+    if (!state.teacher) state.teacher = state.data.teachers[0];
+    if (!state.weekStart) state.weekStart = weekStartOf(state.data.today);
+    if (!state.day) state.day = state.data.today;
+    renderTeacherPicker();
+    render();
   }
 
   var lessonsOf = function (studentId) {
@@ -949,6 +991,12 @@
         return await api(path, method, acks.length ? Object.assign({}, payload, { force: acks }) : payload);
       } catch (err) {
         if (err.status !== 409 || !err.conflict) throw err;
+        // 그 사이에 누가 고쳤으면 밀어붙일 일이 아니다 — 새로 읽어 와야 한다
+        if (err.conflict.type === "stale") {
+          alert(err.conflict.message);
+          await load();
+          return { stale: true };
+        }
         if (!confirm(err.conflict.message)) return { skipped: true };
         // 같은 것을 또 물어보면 서버와 어긋난 것이다 — 무한 반복을 막는다
         if (acks.indexOf(err.conflict.type) >= 0) throw err;
@@ -1049,9 +1097,13 @@
         }
         var res = await saveOne(
           "/api/lessons/" + state.editingLesson.id, "PUT",
-          Object.assign({}, collected, { scope: scope }),
+          Object.assign({}, collected, {
+            scope: scope,
+            updated_at: state.editingLesson.updated_at
+          }),
         );
-        // 취소했으면 창을 닫지 않는다 — 고치던 내용이 사라지면 안 된다
+        // 취소했거나 남이 먼저 고쳤으면 창을 닫지 않는다 — 고치던 내용이 사라지면 안 된다
+        if (res.stale) { $("lesson-msg").textContent = "새로 읽었습니다. 다시 확인하고 저장해 주세요."; return; }
         if (res.skipped) { $("lesson-msg").textContent = "저장하지 않았습니다."; return; }
         closeLesson();
         await load();
@@ -1211,8 +1263,12 @@
         }
         var res = await saveOne(
           "/api/blocks/" + state.editingBlock.id, "PUT",
-          Object.assign({}, collected, { scope: scope }),
+          Object.assign({}, collected, {
+            scope: scope,
+            updated_at: state.editingBlock.updated_at
+          }),
         );
+        if (res.stale) { $("block-msg").textContent = "새로 읽었습니다. 다시 확인하고 저장해 주세요."; return; }
         if (res.skipped) { $("block-msg").textContent = "저장하지 않았습니다."; return; }
         closeBlock();
         await load();
@@ -1349,7 +1405,10 @@
     };
     $("s-save").disabled = true;
     try {
-      if (state.editingStudent) await api("/api/students/" + state.editingStudent.id, "PUT", payload);
+      if (state.editingStudent) {
+        await api("/api/students/" + state.editingStudent.id, "PUT",
+          Object.assign({}, payload, { updated_at: state.editingStudent.updated_at }));
+      }
       else await api("/api/students", "POST", payload);
       closeStudent();
       await load();
@@ -1393,6 +1452,12 @@
     DOW_LABELS: DOW_LABELS, addDays: addDays, dowOf: dowOf, parseDate: parseDate,
     mmdd: mmdd, esc: esc, teacherColumns: teacherColumns, dateColumns: dateColumns
   } };
+
+  /* 창이 다시 보일 때와 60초마다 따라잡는다. 창이 숨어 있으면 아무것도 안 한다. */
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) refreshIfChanged();
+  });
+  setInterval(refreshIfChanged, 60000);
 
   (function boot() {
     var saved = "";

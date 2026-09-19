@@ -201,6 +201,12 @@ async function saveLesson(
   const parsed = parseLesson(body, students);
   if (typeof parsed === "string") return bad(parsed);
 
+  if (existingId) {
+    const current = lessons.find((l) => l.id === existingId);
+    if (!current) return bad("없는 수업입니다.", 404);
+    if (stale(body, current)) return staleResponse("수업");
+  }
+
   const conflicts = findConflicts(parsed, lessons, blocks, existingId ?? undefined);
 
   // 정규수업이나 휴가가 깔려 있는 시간 — 학생 겹침보다 먼저 알려 준다
@@ -283,10 +289,16 @@ async function saveBlock(
   body: Record<string, unknown>,
   existingId: string | null,
 ): Promise<Response> {
-  const { students, lessons } = await loadAll(env);
+  const { students, lessons, blocks } = await loadAll(env);
 
   const parsed = parseBlock(body, students);
   if (typeof parsed === "string") return bad(parsed);
+
+  if (existingId) {
+    const current = blocks.find((b) => b.id === existingId);
+    if (!current) return bad("없는 수업불가입니다.", 404);
+    if (stale(body, current)) return staleResponse("수업불가");
+  }
 
   if (!acked(body, "lessons-under")) {
     const hit = lessons.filter(
@@ -322,6 +334,28 @@ async function saveBlock(
   return json({ id });
 }
 
+/**
+ * 화면이 들고 있던 것과 지금 저장된 것이 같은가.
+ *
+ * 다르면 그 사이에 누가 고친 것이다. 말없이 덮어쓰면 그 사람의 수정이 사라진다.
+ * 화면이 수정 시각을 안 보내면(예전 화면) 그냥 통과시킨다 — 막는 것보다 낫다.
+ */
+function stale(body: Record<string, unknown>, current: { updated_at: string }): boolean {
+  const had = body.updated_at;
+  return typeof had === "string" && had !== "" && had !== current.updated_at;
+}
+
+const staleResponse = (what: string) =>
+  json(
+    {
+      conflict: {
+        type: "stale",
+        message: "그 사이에 다른 곳에서 이 " + what + "을(를) 고쳤습니다. 새로 읽어 옵니다.",
+      },
+    },
+    409,
+  );
+
 /** 몸통에서 범위를 읽는다. 없거나 이상하면 "이것만". */
 const scopeOf = (body: Record<string, unknown>): Scope =>
   isScope(body.scope) ? body.scope : "one";
@@ -345,6 +379,8 @@ async function saveLessonSeries(
 
   const parsed = parseLesson(body, students);
   if (typeof parsed === "string") return bad(parsed);
+
+  if (stale(body, target)) return staleResponse("수업");
 
   const members = membersInScope(target, lessons, scope);
   const shift = dayDiff(target.date, parsed.date);
@@ -410,6 +446,8 @@ async function saveBlockSeries(
   const parsed = parseBlock(body, students);
   if (typeof parsed === "string") return bad(parsed);
 
+  if (stale(body, target)) return staleResponse("수업불가");
+
   const members = membersInScope(target, blocks, scope);
   const shift = dayDiff(target.date, parsed.date);
 
@@ -439,6 +477,12 @@ async function saveStudent(
 ): Promise<Response> {
   const parsed = parseStudent(body);
   if (typeof parsed === "string") return bad(parsed);
+
+  if (existingId) {
+    const current = (await loadAll(env)).students.find((s) => s.id === existingId);
+    if (!current) return bad("없는 학생입니다.", 404);
+    if (stale(body, current)) return staleResponse("학생");
+  }
 
   let id = existingId;
   if (existingId) await updateStudent(env, existingId, parsed);

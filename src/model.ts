@@ -27,7 +27,17 @@ export const SLOT_MIN = 30;
 /** 격자 빈 칸을 눌렀을 때 기본으로 잡히는 수업 길이. */
 export const DEFAULT_DURATION_MIN = 120;
 
-export interface Student {
+/**
+ * Notion 이 준 마지막 수정 시각. 먼저 고친 사람을 말없이 덮어쓰지 않으려고
+ * 들고 다닌다 — 저장할 때 서버가 지금 값과 대조한다.
+ *
+ * Notion 은 이 값을 **분 단위**로 준다. 같은 분 안에 둘이 고치면 못 잡는다.
+ */
+export interface Versioned {
+  updated_at: string;
+}
+
+export interface Student extends Versioned {
   id: string;          // Notion 페이지 ID
   name: string;
   contact: string | null;
@@ -35,7 +45,7 @@ export interface Student {
   memo: string | null;
 }
 
-export interface Lesson {
+export interface Lesson extends Versioned {
   id: string;          // Notion 페이지 ID
   teacher: Teacher;
   /**
@@ -68,7 +78,7 @@ export interface Lesson {
  *
  * 셋 다 비면 모두에게 걸린다 (연휴처럼).
  */
-export interface Block {
+export interface Block extends Versioned {
   id: string;
   teacher: Teacher | null;   // null이면 선생님을 가리지 않는다
   student_ids: string[];     // 비어 있으면 학생을 가리지 않는다
@@ -112,10 +122,10 @@ export function membersInScope<T extends { id: string; date: string; series_id: 
   return picked.some((x) => x.id === target.id) ? picked : [target, ...picked];
 }
 
-/** 저장 직전의 값 — 아직 ID가 없다. */
-export type StudentInput = Omit<Student, "id">;
-export type LessonInput = Omit<Lesson, "id">;
-export type BlockInput = Omit<Block, "id">;
+/** 저장 직전의 값 — 아직 ID도, 수정 시각도 없다. */
+export type StudentInput = Omit<Student, "id" | "updated_at">;
+export type LessonInput = Omit<Lesson, "id" | "updated_at">;
+export type BlockInput = Omit<Block, "id" | "updated_at">;
 
 // ── 시각 ────────────────────────────────────────────
 
