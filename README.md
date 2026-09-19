@@ -187,7 +187,7 @@ src/index.ts        /api/* 라우터 + 보안 응답 머리
 public/index.html   마크업과 스타일
 public/app.js       화면 — 렌더링 · 폼 · 통신
 public/png.js       PNG 내보내기 (app.js 의 window.__nadajoo 를 쓴다)
-public/fonts/       Paperlogy woff2 4종
+public/fonts/       Noto Sans KR woff2 (400·500·700 × 한글/라틴)
 ```
 
 ## Notion 스키마
@@ -327,8 +327,21 @@ curl -s -H "x-password: <비밀번호>" https://nadajoo.<계정>.workers.dev/api
 
 TIS 교사 페이지 / 교실 사용 현황표 / 개인수업 시간표와 통일합니다.
 
-Paperlogy 폰트 · 흰 배경 · 모서리 반경 4px · **box-shadow 전부 없음** ·
+**Noto Sans KR** · 흰 배경 · 모서리 반경 4px · **box-shadow 전부 없음** ·
 그리드선 1.4px `#DEE2E7` · 버튼은 개별 테두리 + 활성 시 accent `#2F6FEB` 채움
+
+### 폰트
+
+Noto Sans CJK KR 에서 한글만 떼어 낸 판입니다 — 글자 모양은 같고 한자 2만 자와
+FontAwesome 아이콘이 빠져 훨씬 가볍습니다 (CJK OTF 한 벌 11MB → 한글 woff2 한 벌 530KB).
+
+- 싣는 굵기는 **400 · 500 · 700** 세 벌뿐입니다. 소제목에 쓰는 600 은 700 이 받습니다 —
+  한 벌을 더 받자고 540KB 를 더 쓰는 것보다 낫습니다
+- 굵기마다 **한글과 라틴을 따로** 둡니다. 한글 쪽에는 `unicode-range` 가 없어 기본이 되고,
+  라틴 쪽은 범위를 좁혀 뒤에 선언합니다. 숫자와 영문만 있는 화면은 13KB 짜리만 받습니다
+- 파일은 `@fontsource/noto-sans-kr` 에서 가져와 `public/fonts/` 에 넣어 둔 것입니다
+  (외부에서 불러오지 않습니다 — CSP 의 `font-src 'self'` 를 지키고, 접속 기록이
+  바깥으로 나가지 않습니다)
 
 ---
 

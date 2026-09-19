@@ -28,7 +28,7 @@
   var INK_SOFT = "#6B7280";
 
   var font = function (weight, size) {
-    return weight + " " + size + 'px "Paperlogy", -apple-system, "Apple SD Gothic Neo", sans-serif';
+    return weight + " " + size + 'px "Noto Sans KR", -apple-system, "Apple SD Gothic Neo", sans-serif';
   };
 
   /** 웹폰트가 준비되기 전에 그리면 시스템 폰트로 나온다. */
